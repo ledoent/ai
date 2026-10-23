@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<odoo>
+    <record id="ai_agent_provider_view_form" model="ir.ui.view">
+        <field name="model">ai.agent.provider</field>
+        <field name="arch" type="xml">
+            <form>
+                <sheet>
+                    <group>
+                        <field name="name" />
+                        <field name="kind" />
+                        <field name="model" invisible="kind == 'stub'" />
+                        <field name="api_key_env" invisible="kind == 'stub'" />
+                        <field name="base_url" invisible="kind == 'stub'" />
+                        <field name="max_tokens" invisible="kind == 'stub'" />
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="ai_agent_provider_view_list" model="ir.ui.view">
+        <field name="model">ai.agent.provider</field>
+        <field name="arch" type="xml">
+            <list>
+                <field name="name" />
+                <field name="kind" />
+                <field name="model" />
+            </list>
+        </field>
+    </record>
+
+    <record id="ai_agent_provider_action" model="ir.actions.act_window">
+        <field name="name">AI Providers</field>
+        <field name="res_model">ai.agent.provider</field>
+    </record>
+
+    <record id="ai_agent_view_form_llm" model="ir.ui.view">
+        <field name="model">ai.agent</field>
+        <field name="inherit_id" ref="ai_agent_runtime.ai_agent_view_form" />
+        <field name="arch" type="xml">
+            <field name="active" position="after">
+                <field name="provider_id" />
+                <field name="max_steps" />
+            </field>
+        </field>
+    </record>
+
+    <record id="ai_agent_run_view_form_llm" model="ir.ui.view">
+        <field name="model">ai.agent.run</field>
+        <field name="inherit_id" ref="ai_agent_runtime.ai_agent_run_view_form" />
+        <field name="arch" type="xml">
+            <field name="plan" position="before">
+                <field name="goal" placeholder="What should the agent accomplish?" />
+                <field name="answer" invisible="not answer" />
+            </field>
+        </field>
+    </record>
+
+    <menuitem
+        id="menu_ai_agent_provider"
+        parent="ai_agent_runtime.menu_ai_agent_root"
+        action="ai_agent_provider_action"
+        sequence="30"
+    />
+</odoo>
