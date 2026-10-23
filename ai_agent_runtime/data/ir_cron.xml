@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<odoo>
+    <!-- Inactive by default: enabling background execution should be a
+         deliberate act, and an always-on drain in a test or review database
+         would execute plans nobody asked for. -->
+    <record id="ir_cron_ai_agent_drain" model="ir.cron">
+        <field name="name">AI Agent: drain pending runs</field>
+        <field name="model_id" ref="model_ai_agent_run" />
+        <field name="state">code</field>
+        <field name="code">model._cron_drain()</field>
+        <field name="interval_number" eval="5" />
+        <field name="interval_type">minutes</field>
+        <field name="active" eval="False" />
+    </record>
+</odoo>

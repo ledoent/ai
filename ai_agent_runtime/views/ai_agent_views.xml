@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<odoo>
+    <record id="ai_agent_tool_view_list" model="ir.ui.view">
+        <field name="model">ai.agent.tool</field>
+        <field name="arch" type="xml">
+            <list>
+                <field name="name" />
+                <field name="model_name" />
+                <field name="method_name" />
+                <field name="classification" />
+                <field name="requires_approval" />
+            </list>
+        </field>
+    </record>
+
+    <record id="ai_agent_tool_view_form" model="ir.ui.view">
+        <field name="model">ai.agent.tool</field>
+        <field name="arch" type="xml">
+            <form>
+                <sheet>
+                    <group>
+                        <field name="name" />
+                        <field name="model_name" />
+                        <field name="method_name" />
+                        <field name="classification" />
+                        <field name="requires_approval" />
+                    </group>
+                    <field name="description" placeholder="What this tool does..." />
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="ai_agent_view_form" model="ir.ui.view">
+        <field name="model">ai.agent</field>
+        <field name="arch" type="xml">
+            <form>
+                <sheet>
+                    <group>
+                        <field name="name" />
+                        <field name="user_id" />
+                        <field name="active" />
+                    </group>
+                    <field name="tool_ids" widget="many2many" />
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="ai_agent_view_list" model="ir.ui.view">
+        <field name="model">ai.agent</field>
+        <field name="arch" type="xml">
+            <list>
+                <field name="name" />
+                <field name="user_id" />
+            </list>
+        </field>
+    </record>
+
+    <record id="ai_agent_tool_action" model="ir.actions.act_window">
+        <field name="name">Agent Tools</field>
+        <field name="res_model">ai.agent.tool</field>
+    </record>
+
+    <record id="ai_agent_action" model="ir.actions.act_window">
+        <field name="name">AI Agents</field>
+        <field name="res_model">ai.agent</field>
+    </record>
+
+    <menuitem id="menu_ai_agent_root" name="AI Agents" sequence="95" />
+    <menuitem
+        id="menu_ai_agent"
+        parent="menu_ai_agent_root"
+        action="ai_agent_action"
+        sequence="10"
+    />
+    <menuitem
+        id="menu_ai_agent_tool"
+        parent="menu_ai_agent_root"
+        action="ai_agent_tool_action"
+        sequence="20"
+    />
+</odoo>
