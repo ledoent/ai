@@ -249,3 +249,76 @@ class TestRuleDiscovery(ReconCommon):
             catchall.can_be_proposed,
             "a rule with no criteria becomes proposable on trigger alone",
         )
+
+
+class TestBatchEmail(ReconCommon):
+    """One mail about a batch, to configured people, or a clear refusal."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.reviewer = new_test_user(
+            cls.env,
+            login="batch_reviewer",
+            groups="base.group_user,account.group_account_user",
+        )
+        cls.reviewer.email = "reviewer@example.invalid"
+
+    def test_refuses_when_nobody_is_configured(self):
+        """Silently sending to nobody is the failure mode worth preventing."""
+        self.batch.company_ids = self.company
+        self.company.ai_recon_reviewer_ids = False
+        with self.assertRaises(UserError):
+            self.batch.action_send()
+
+    def test_sends_one_mail_to_the_configured_reviewers(self):
+        self.batch.company_ids = self.company
+        self.company.ai_recon_reviewer_ids = self.reviewer
+        self.make(confidence="medium")
+        before = self.env["mail.mail"].search_count([])
+        self.batch.action_send()
+        self.assertEqual(self.env["mail.mail"].search_count([]) - before, 1)
+
+    def test_recipients_come_from_the_company(self):
+        self.batch.company_ids = self.company
+        self.company.ai_recon_reviewer_ids = self.reviewer
+        self.assertIn(self.reviewer, self.batch._recipients())
+
+    def test_cron_builds_classifies_and_sends(self):
+        self.company.ai_recon_reviewer_ids = self.reviewer
+        before = self.env["mail.mail"].search_count([])
+        batch = self.env["ai.recon.batch"]._cron_build_and_send()
+        self.assertTrue(batch)
+        self.assertGreater(batch.lines_seen, 0)
+        self.assertTrue(batch.proposal_ids, "every line seen gets a proposal")
+        self.assertEqual(self.env["mail.mail"].search_count([]) - before, 1)
+
+    def test_cron_refuses_rather_than_mailing_nobody(self):
+        """A batch that reaches no one is worse than a loud failure."""
+        self.env["res.company"].search([]).write({"ai_recon_reviewer_ids": False})
+        with self.assertRaises(UserError):
+            self.env["ai.recon.batch"]._cron_build_and_send()
+
+    def test_unclassified_lines_still_cluster(self):
+        """With no agent attached the batch is still useful: it reports what
+        was seen and which repeats look like a missing rule."""
+        self.company.ai_recon_reviewer_ids = self.reviewer
+        batch = self.env["ai.recon.batch"]._cron_build_and_send()
+        self.assertEqual(batch.count_none, len(batch.proposal_ids))
+        self.assertTrue(all(p.state == "noted" for p in batch.proposal_ids))
+
+    def test_top_clusters_renders_for_the_template(self):
+        for label in ("AMZN Mktp A", "AMZN Mktp B"):
+            line = self.env["account.bank.statement.line"].create(
+                {
+                    "journal_id": self.journal.id,
+                    "payment_ref": label,
+                    "amount": -3.0,
+                    "date": fields.Date.today(),
+                }
+            )
+            self.make(confidence="none", line=line)
+        clusters = self.batch._top_clusters()
+        self.assertTrue(clusters)
+        self.assertEqual(clusters[0]["prefix"], "AMZN MKTP")
+        self.assertEqual(clusters[0]["journal"], self.journal.code)

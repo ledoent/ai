@@ -95,6 +95,12 @@
                         string="Draft rules from unmatched"
                         type="object"
                     />
+                    <button
+                        name="action_send"
+                        string="Send review email"
+                        type="object"
+                        class="btn-primary"
+                    />
                 </header>
                 <sheet>
                     <group>

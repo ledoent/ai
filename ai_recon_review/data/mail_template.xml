@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<odoo>
+    <record id="mail_template_recon_batch" model="mail.template">
+        <field name="name">Reconciliation review batch</field>
+        <field name="model_id" ref="ai_recon_review.model_ai_recon_batch" />
+        <field
+            name="subject"
+        >Reconciliation review — {{ object.count_medium or 0 }} to approve, {{ object.count_none or 0 }} unknown</field>
+        <field
+            name="email_from"
+        >{{ (object.company_ids[:1].email or user.email_formatted) }}</field>
+        <field name="body_html" type="html">
+            <div
+                style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;font-size:14px;"
+            >
+                <p>
+                    Overnight reconciliation run over
+                    <strong t-out="object.lines_seen">0</strong> unreconciled lines.
+                </p>
+                <p t-if="object.truncated" style="color:#b03030;">
+                    <strong>Warning:</strong> the scanning user could not see every
+                    line it was asked about, so these counts cover a subset.
+                </p>
+
+                <h3 style="margin-bottom:4px;">Needs a decision —
+                    <t t-out="object.count_medium">0</t>
+                </h3>
+                <p style="margin-top:0;color:#555;">
+                    Nothing was written for these. The entry still sits in suspense
+                    and is flagged in Odoo's To&#160;Review list.
+                </p>
+                <table width="100%" cellpadding="4" style="border-collapse:collapse;">
+                    <tr style="text-align:left;border-bottom:1px solid #ddd;">
+                        <th>Journal</th>
+                        <th>Label</th>
+                        <th align="right">Amount</th>
+                        <th>Proposed account</th>
+                    </tr>
+                    <tr
+                        t-foreach="object.proposal_ids.filtered(lambda p: p.confidence == 'medium')[:25]"
+                        t-as="p"
+                        style="border-bottom:1px solid #f0f0f0;"
+                    >
+                        <td t-out="p.journal_id.code">J</td>
+                        <td t-out="p.payment_ref or ''">label</td>
+                        <td align="right" t-out="p.amount">0</td>
+                        <td t-out="p.account_id.display_name or '—'">acct</td>
+                    </tr>
+                </table>
+
+                <h3 style="margin-bottom:4px;">Applied automatically —
+                    <t t-out="object.count_high">0</t>
+                </h3>
+                <p style="margin-top:0;color:#555;">
+                    Confident matches, already reconciled and marked
+                    <em>To&#160;Review</em>. Reconciliation is reversible, so these
+                    are a sampling exercise rather than a queue.
+                </p>
+
+                <h3 style="margin-bottom:4px;">Seen, no action taken —
+                    <t t-out="object.count_none">0</t>
+                </h3>
+                <p style="margin-top:0;color:#555;">
+                    No rule matched and the agent would not guess. The repeating
+                    ones below are each a missing matching rule:
+                </p>
+                <table width="100%" cellpadding="4" style="border-collapse:collapse;">
+                    <tr style="text-align:left;border-bottom:1px solid #ddd;">
+                        <th>Pattern</th>
+                        <th>Journal</th>
+                        <th align="right">Lines</th>
+                    </tr>
+                    <tr
+                        t-foreach="object._top_clusters()"
+                        t-as="c"
+                        style="border-bottom:1px solid #f0f0f0;"
+                    >
+                        <td t-out="c['prefix']">prefix</td>
+                        <td t-out="c['journal']">J</td>
+                        <td align="right" t-out="c['count']">0</td>
+                    </tr>
+                </table>
+
+                <p style="margin-top:20px;">
+                    <a
+                        t-attf-href="{{ object.get_base_url() }}/odoo/action-ai_recon_review.ai_recon_batch_action/{{ object.id }}"
+                        style="background:#714B67;color:#fff;padding:9px 16px;border-radius:4px;text-decoration:none;"
+                    >
+                        Open the batch in Odoo
+                    </a>
+                </p>
+                <p style="color:#888;font-size:12px;">
+                    The link opens Odoo — approving happens in a session, so the
+                    action is attributable to whoever clicks it.
+                </p>
+            </div>
+        </field>
+        <field name="auto_delete" eval="False" />
+    </record>
+</odoo>

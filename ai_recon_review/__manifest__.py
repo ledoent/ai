@@ -14,6 +14,8 @@
     ],
     "data": [
         "security/ir.access.csv",
+        "data/mail_template.xml",
+        "data/ir_cron.xml",
         "views/ai_recon_views.xml",
     ],
     "demo": [],
