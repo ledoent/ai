@@ -69,6 +69,16 @@ company setting the module did not own, and with that setting off the
 guarantee evaporated. A vertical resting on an external precondition
 checks it there rather than documenting it and hoping.
 
+Approval checks the state and preconditions of the whole selection
+before recording approval metadata or applying its first item.
+``_execute()`` rechecks the vertical's preconditions immediately before
+applying the action.
+
+Batch clustering uses ``_clustering_proposals()``, which defaults to the
+batch's own proposals. A vertical can override it to include unresolved
+subjects from earlier batches without changing the generic label/count
+contract.
+
 Where this does not belong
 --------------------------
 

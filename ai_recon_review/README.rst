@@ -67,6 +67,16 @@ fill the review queue and is structurally incapable of clearing it.
 There is a test asserting exactly that, because the separation of duties
 rests on it.
 
+This separation requires Accounting Firms mode to be enabled for both
+the subject's company and the current company. Routing and approval
+refuse to apply proposals when that precondition no longer holds.
+
+Repeated batches keep one live proposal per statement line, enforced in
+the database. Unknown observations remain available for clustering
+across batches, counted once per distinct unresolved line. Applied and
+rejected proposals remain as history. A line made unreconciled again can
+be considered in a fresh batch.
+
 .. IMPORTANT::
    This is an alpha version, the data model and design can change at any time without warning.
    Only for development or testing purpose, do not use in production.
@@ -106,6 +116,19 @@ Then ``batch.action_draft_rules()`` creates one **inactive**
 ``account.reconcile.model`` per cluster of unmatched lines. They change
 nothing until somebody activates them, and the account is deliberately
 left empty — choosing it is the judgement being asked for.
+
+The scheduled builder considers unreconciled lines without an existing
+live proposal. It sends no empty batch when nothing new needs review.
+Clustering includes unknown observations from earlier batches in the
+scanned companies.
+
+During upgrade, redundant unknown observations are removed before the
+live proposal uniqueness index is installed. The oldest observation is
+retained, unless a live proposal already covers that line. Conflicting
+live proposals are preserved and stop the upgrade with a message
+identifying the statement line; resolve those conflicts before retrying.
+Housekeeping also repairs redundant unknown observations without
+expiring the distinct unknown corpus.
 
 A warning about catch-all rules
 -------------------------------

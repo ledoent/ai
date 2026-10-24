@@ -49,8 +49,11 @@ class AiReconBatch(models.Model):
         interval is the cron record's own, so changing the cadence is a
         settings change rather than a code change.
         """
-        BSL = self.env["account.bank.statement.line"]
-        lines = BSL.search([("is_reconciled", "!=", True)])
+        lines = (
+            self._candidates()
+            .try_lock_for_update()
+            .filtered_domain(self._candidate_domain())
+        )
         if not lines:
             _logger.info("ai.recon.batch: nothing unreconciled, no batch sent")
             return False
@@ -80,6 +83,10 @@ class AiReconBatch(models.Model):
         replace this to plug in whatever is doing the judging.
         """
         self.ensure_one()
+        # Skip subjects another builder is processing. The partial unique
+        # index on live proposals is the final guard: a repeatable-read
+        # snapshot can still miss a proposal committed before this lock.
+        lines = lines.try_lock_for_update().filtered_domain(self._candidate_domain())
         Proposal = self.env["ai.recon.proposal"]
         proposals = Proposal.create(
             [
@@ -103,8 +110,49 @@ class AiReconBatch(models.Model):
     def _mail_template(self):
         return self.env.ref("ai_recon_review.mail_template_recon_batch")
 
+    def _clustering_proposals(self):
+        """Cluster unresolved subjects across intake batches, once each.
+
+        Deduplication keeps a subject in its first batch. Restricting the corpus
+        to that batch would prevent matching unknowns arriving on different
+        days from ever forming a rule candidate.
+        """
+        self.ensure_one()
+        domain = [
+            ("state", "=", "noted"),
+            ("confidence", "=", "none"),
+            ("statement_line_id.is_reconciled", "!=", True),
+        ]
+        if self.company_ids:
+            domain.append(("company_id", "in", self.company_ids.ids))
+        proposals = self.env["ai.recon.proposal"].search(domain, order="id")
+        # Also give an honest count before legacy duplicate cleanup has run.
+        seen = set()
+        ids = []
+        for proposal in proposals:
+            subject = proposal.statement_line_id.id
+            if subject not in seen:
+                seen.add(subject)
+                ids.append(proposal.id)
+        return proposals.browse(ids)
+
     @api.model
     def _candidates(self):
-        return self.env["account.bank.statement.line"].search(
-            [("is_reconciled", "!=", True)]
-        )
+        return self.env["account.bank.statement.line"].search(self._candidate_domain())
+
+    @api.model
+    def _candidate_domain(self):
+        return [
+            ("is_reconciled", "!=", True),
+            (
+                "ai_recon_proposal_ids",
+                "not any",
+                [
+                    (
+                        "state",
+                        "in",
+                        ["observed", "proposed", "approved", "noted"],
+                    )
+                ],
+            ),
+        ]

@@ -24,6 +24,17 @@ Then `batch.action_draft_rules()` creates one **inactive**
 until somebody activates them, and the account is deliberately left empty —
 choosing it is the judgement being asked for.
 
+The scheduled builder considers unreconciled lines without an existing live
+proposal. It sends no empty batch when nothing new needs review. Clustering
+includes unknown observations from earlier batches in the scanned companies.
+
+During upgrade, redundant unknown observations are removed before the live
+proposal uniqueness index is installed. The oldest observation is retained,
+unless a live proposal already covers that line. Conflicting live proposals
+are preserved and stop the upgrade with a message identifying the statement
+line; resolve those conflicts before retrying. Housekeeping also repairs
+redundant unknown observations without expiring the distinct unknown corpus.
+
 ## A warning about catch-all rules
 
 A reconcile model with no `match_label`, `match_amount` or `match_partner_ids`

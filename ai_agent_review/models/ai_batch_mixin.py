@@ -41,6 +41,11 @@ class AiBatchMixin(models.AbstractModel):
 
     # -- clustering ----------------------------------------------------------
 
+    def _clustering_proposals(self):
+        """The corpus to cluster. Verticals may include earlier batches."""
+        self.ensure_one()
+        return self.proposal_ids
+
     def _unmatched_clusters(self, min_size=2):
         """Group the 'no idea' pile into candidate rules.
 
@@ -51,7 +56,9 @@ class AiBatchMixin(models.AbstractModel):
         """
         self.ensure_one()
         buckets = {}
-        for proposal in self.proposal_ids.filtered(lambda p: p.confidence == "none"):
+        for proposal in self._clustering_proposals().filtered(
+            lambda p: p.confidence == "none"
+        ):
             key = proposal._cluster_key()
             if key is None:
                 continue

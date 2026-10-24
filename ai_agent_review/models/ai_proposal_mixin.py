@@ -71,14 +71,20 @@ class AiProposalMixin(models.AbstractModel):
                     state=self.state,
                 )
             )
+        # Staging can precede approval by days; a configuration assumption
+        # checked during routing must still hold at the point of dispatch.
+        self._assert_preconditions()
         self._apply()
         self.state = "applied"
         return True
 
     def action_approve(self):
+        # Validate the whole selection before recording a judgement or applying
+        # its first item. A later invalid item must not leave earlier effects.
+        if any(proposal.state not in ("proposed", "observed") for proposal in self):
+            raise UserError(self.env._("Only a proposed line can be approved."))
+        self._assert_preconditions()
         for proposal in self:
-            if proposal.state not in ("proposed", "observed"):
-                raise UserError(self.env._("Only a proposed line can be approved."))
             proposal.write(
                 {
                     "state": "approved",

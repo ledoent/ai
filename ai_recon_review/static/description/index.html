@@ -406,6 +406,14 @@ is where approval frameworks usually become brittle.</p>
 fill the review queue and is structurally incapable of clearing it.
 There is a test asserting exactly that, because the separation of duties
 rests on it.</p>
+<p>This separation requires Accounting Firms mode to be enabled for both
+the subject’s company and the current company. Routing and approval
+refuse to apply proposals when that precondition no longer holds.</p>
+<p>Repeated batches keep one live proposal per statement line, enforced in
+the database. Unknown observations remain available for clustering
+across batches, counted once per distinct unresolved line. Applied and
+rejected proposals remain as history. A line made unreconciled again can
+be considered in a fresh batch.</p>
 <div class="admonition important">
 <p class="first admonition-title">Important</p>
 <p class="last">This is an alpha version, the data model and design can change at any time without warning.
@@ -452,6 +460,17 @@ marked <tt class="docutils literal">no_review</tt> and never enters the queue.</
 <tt class="docutils literal">account.reconcile.model</tt> per cluster of unmatched lines. They change
 nothing until somebody activates them, and the account is deliberately
 left empty — choosing it is the judgement being asked for.</p>
+<p>The scheduled builder considers unreconciled lines without an existing
+live proposal. It sends no empty batch when nothing new needs review.
+Clustering includes unknown observations from earlier batches in the
+scanned companies.</p>
+<p>During upgrade, redundant unknown observations are removed before the
+live proposal uniqueness index is installed. The oldest observation is
+retained, unless a live proposal already covers that line. Conflicting
+live proposals are preserved and stop the upgrade with a message
+identifying the statement line; resolve those conflicts before retrying.
+Housekeeping also repairs redundant unknown observations without
+expiring the distinct unknown corpus.</p>
 <div class="section" id="a-warning-about-catch-all-rules">
 <h3><a class="toc-backref" href="#toc-entry-2">A warning about catch-all rules</a></h3>
 <p>A reconcile model with no <tt class="docutils literal">match_label</tt>, <tt class="docutils literal">match_amount</tt> or

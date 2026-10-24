@@ -55,6 +55,63 @@ class AiReconProposal(models.Model):
         "UNIQUE(statement_line_id, batch_id)",
         "That statement line already has a proposal in this batch.",
     )
+    _one_live_per_line = models.UniqueIndex(
+        "(statement_line_id) WHERE state IN "
+        "('observed', 'proposed', 'approved', 'noted')",
+        "That statement line already has a live review proposal.",
+    )
+
+    def init(self):
+        """Repair old notes before the upgrade retries the unique index.
+
+        ``_auto_init`` first attempts the index; an upgrade queues a failed
+        attempt until ``Registry.finalize_constraints``. ``init`` repairs the
+        old notes before that retry. Only redundant notes are disposable;
+        conflicting human proposals require an explicit decision.
+        """
+        result = super().init()
+        self._gc_duplicate_observations()
+        self.env.cr.execute(
+            """
+            SELECT statement_line_id
+              FROM ai_recon_proposal
+             WHERE state IN ('observed', 'proposed', 'approved')
+             GROUP BY statement_line_id
+            HAVING COUNT(*) > 1
+             LIMIT 1
+            """
+        )
+        if collision := self.env.cr.fetchone():
+            raise UserError(
+                self.env._(
+                    "Statement line %(line)s has multiple live review proposals. "
+                    "Resolve them before upgrading; no human proposal was deleted.",
+                    line=collision[0],
+                )
+            )
+        return result
+
+    @api.autovacuum
+    def _gc_duplicate_observations(self):
+        """Repair repeated observations without discarding the unknown corpus.
+
+        Keep the oldest note for each subject, unless a live human proposal
+        already covers it. Human proposals and applied/rejected history are
+        never removed. This also repairs the old nightly builder's notes.
+        """
+        seen = set(
+            self.search(
+                [("state", "in", ["observed", "proposed", "approved"])]
+            ).statement_line_id.ids
+        )
+        duplicates = []
+        for proposal in self.search([("state", "=", "noted")], order="id"):
+            subject = proposal.statement_line_id.id
+            if subject in seen:
+                duplicates.append(proposal.id)
+            else:
+                seen.add(subject)
+        self.browse(duplicates).unlink()
 
     # -- applying ------------------------------------------------------------
 
@@ -130,7 +187,7 @@ class AiReconProposal(models.Model):
 
     def _assert_preconditions(self):
         """Bank's safety rests on a setting this code does not own."""
-        self._assert_review_gate(self.company_id)
+        self._assert_review_gate(self.company_id | self.env.company)
         return True
 
     def _undo(self):
@@ -202,7 +259,9 @@ class AiReconProposal(models.Model):
         practice, because there is no configuration in which the agent runs
         and the gate does not hold.
         """
-        inert = companies.filtered(lambda c: not c.set_to_review_documents)
+        inert = (companies | self.env.company).filtered(
+            lambda c: not c.set_to_review_documents
+        )
         if inert:
             raise UserError(
                 self.env._(

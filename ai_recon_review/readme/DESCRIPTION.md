@@ -28,3 +28,12 @@ needs no accounting rights, while `reviewed` requires `account.group_account_use
 An agent below that group can therefore fill the review queue and is
 structurally incapable of clearing it. There is a test asserting exactly that,
 because the separation of duties rests on it.
+
+This separation requires Accounting Firms mode to be enabled for both the
+subject's company and the current company. Routing and approval refuse to
+apply proposals when that precondition no longer holds.
+
+Repeated batches keep one live proposal per statement line, enforced in the
+database. Unknown observations remain available for clustering across batches,
+counted once per distinct unresolved line. Applied and rejected proposals remain
+as history. A line made unreconciled again can be considered in a fresh batch.

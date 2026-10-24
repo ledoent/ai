@@ -1,6 +1,9 @@
+from psycopg2.errors import UniqueViolation
+
 from odoo import fields
 from odoo.exceptions import AccessError, UserError
 from odoo.tests import TransactionCase, new_test_user, tagged
+from odoo.tools import mute_logger, sql
 
 
 @tagged("post_install", "-at_install")
@@ -209,8 +212,10 @@ class TestRuleDiscovery(ReconCommon):
 
     def test_clusters_group_by_vendor_prefix_and_journal(self):
         for label in ("AMZN Mktp US*2K4", "AMZN Mktp US*9QQ", "AMZN Mktp US*1AA"):
-            self.make(confidence="none", line=self._line(label))
-        self.make(confidence="none", line=self._line("SOLO VENDOR ONCE"))
+            self.make(confidence="none", line=self._line(label)).state = "noted"
+        self.make(
+            confidence="none", line=self._line("SOLO VENDOR ONCE")
+        ).state = "noted"
         clusters = self.batch._unmatched_clusters()
         self.assertEqual(len(clusters), 1, "singletons are not a pattern")
         (prefix, _journal), proposals = next(iter(clusters.items()))
@@ -219,7 +224,7 @@ class TestRuleDiscovery(ReconCommon):
 
     def test_drafted_rules_are_inactive_and_change_nothing(self):
         for label in ("AMZN Mktp US*2K4", "AMZN Mktp US*9QQ"):
-            self.make(confidence="none", line=self._line(label))
+            self.make(confidence="none", line=self._line(label)).state = "noted"
         rules = self.batch.action_draft_rules()
         self.assertEqual(len(rules), 1)
         rule = rules[0]
@@ -317,7 +322,7 @@ class TestBatchEmail(ReconCommon):
                     "date": fields.Date.today(),
                 }
             )
-            self.make(confidence="none", line=line)
+            self.make(confidence="none", line=line).state = "noted"
         clusters = self.batch._top_clusters()
         self.assertTrue(clusters)
         # The mail contract is generic -- label and count only. The bank
@@ -389,3 +394,223 @@ class TestReviewGatePrecondition(ReconCommon):
         self.st_line.invalidate_recordset()
         self.assertIn(suspense, self.st_line.line_ids.account_id)
         self.assertEqual(proposal.state, "proposed")
+
+    def test_approval_rechecks_a_gate_disabled_after_staging(self):
+        proposal = self.make()
+        self.env["ai.recon.proposal"]._route(proposal)
+        before = self.st_line.move_id.write_date
+        self.company.set_to_review_documents = False
+        with self.assertRaises(UserError):
+            proposal.action_approve()
+        self.assertEqual(proposal.state, "proposed")
+        self.assertFalse(proposal.approved_by)
+        self.assertFalse(proposal.approved_date)
+        self.assertEqual(self.st_line.move_id.write_date, before)
+        self.assertIn(
+            self.journal.suspense_account_id, self.st_line.line_ids.account_id
+        )
+
+    def test_routing_checks_the_current_company_as_well_as_the_subject(self):
+        other = self.env["res.company"].create(
+            {"name": "Gate disabled current company", "set_to_review_documents": False}
+        )
+        proposal = self.make().with_company(other)
+        with self.assertRaises(UserError):
+            proposal._route(proposal)
+        self.assertEqual(proposal.state, "proposed")
+
+
+class TestRepeatedBatches(ReconCommon):
+    def _fresh_line(self):
+        return self.env["account.bank.statement.line"].create(
+            {
+                "journal_id": self.journal.id,
+                "payment_ref": self.st_line.payment_ref,
+                "amount": -25.0,
+                "date": fields.Date.today(),
+            }
+        )
+
+    def _drop_live_index(self):
+        """Reproduce the legacy schema; TransactionCase rolls DDL back."""
+        Proposal = self.env["ai.recon.proposal"]
+        self.env.flush_all()
+        sql.drop_index(
+            self.cr,
+            Proposal._one_live_per_line.full_name(Proposal),
+            Proposal._table,
+        )
+
+    def test_open_proposal_excludes_line_across_batches(self):
+        for state in ("observed", "proposed", "approved", "noted"):
+            proposal = self.make()
+            proposal.state = state
+            with self.subTest(state=state):
+                self.assertNotIn(self.st_line, self.batch._candidates())
+            proposal.unlink()
+
+    def test_rejected_proposal_allows_fresh_consideration(self):
+        self.make().action_reject()
+        self.assertIn(self.st_line, self.batch._candidates())
+
+    def test_applied_history_does_not_suppress_an_external_undo(self):
+        proposal = self.make()
+        proposal.action_approve()
+        self.st_line.action_undo_reconciliation()
+        self.assertEqual(proposal.state, "applied")
+        self.assertFalse(self.st_line.is_reconciled)
+        self.assertIn(self.st_line, self.batch._candidates())
+
+    def test_database_rejects_live_proposals_in_different_batches(self):
+        self.make()
+        other = self.env["ai.recon.batch"].create({})
+        with (
+            self.assertRaises(UniqueViolation),
+            mute_logger("odoo.sql_db"),
+            self.cr.savepoint(),
+        ):
+            self.env["ai.recon.proposal"].create(
+                {
+                    "batch_id": other.id,
+                    "statement_line_id": self.st_line.id,
+                    "confidence": "none",
+                    "state": "noted",
+                }
+            )
+            self.env.flush_all()
+
+    def test_stale_candidate_list_cannot_create_a_second_proposal(self):
+        candidates = self.st_line
+        first = self.batch._classify(candidates)
+        other = self.env["ai.recon.batch"].create({})
+        self.assertFalse(other._classify(candidates))
+        self.assertEqual(first.state, "noted")
+        self.assertEqual(self.st_line.ai_recon_proposal_ids, first)
+
+    def test_repeated_cron_does_not_grow_unknown_corpus_or_send_empty_mail(self):
+        reviewer = new_test_user(
+            self.env,
+            login="repeat_reviewer",
+            groups="base.group_user,account.group_account_user",
+        )
+        reviewer.email = "repeat@example.invalid"
+        self.company.ai_recon_reviewer_ids = reviewer
+        Batch = self.env["ai.recon.batch"]
+        Proposal = self.env["ai.recon.proposal"]
+        Batch._cron_build_and_send()
+        before = Proposal.search_count([])
+        mails = self.env["mail.mail"].search_count([])
+        self.assertFalse(Batch._cron_build_and_send())
+        self.assertEqual(Proposal.search_count([]), before)
+        self.assertEqual(self.env["mail.mail"].search_count([]), mails)
+
+    def test_cleanup_preserves_one_note_per_distinct_line_and_judgements(self):
+        self._drop_live_index()
+        first = self.make(confidence="none")
+        first.state = "noted"
+        other = self.env["ai.recon.batch"].create({})
+        duplicate = first.copy({"batch_id": other.id, "state": "noted"})
+        judged = self.make(line=self._fresh_line())
+        judged.action_reject()
+        distinct = self.make(confidence="none", line=self._fresh_line())
+        distinct.state = "noted"
+        first._gc_duplicate_observations()
+        self.assertTrue(first.exists())
+        self.assertTrue(distinct.exists())
+        self.assertTrue(judged.exists())
+        self.assertFalse(duplicate.exists())
+        first._gc_duplicate_observations()
+        self.assertTrue((first | distinct | judged).exists())
+
+    def test_cleanup_preserves_distinct_lines_in_the_cluster(self):
+        self._drop_live_index()
+        first = self.make(confidence="none")
+        second = self.make(
+            confidence="none",
+            line=self._fresh_line(),
+        )
+        (first | second).write({"state": "noted"})
+        other = self.env["ai.recon.batch"].create({})
+        first.copy({"batch_id": other.id, "state": "noted"})
+        first._gc_duplicate_observations()
+        self.assertEqual(self.batch._top_clusters()[0]["count"], 2)
+
+    def test_upgrade_repairs_notes_before_creating_the_unique_index(self):
+        self._drop_live_index()
+        first = self.make(confidence="none")
+        first.state = "noted"
+        other = self.env["ai.recon.batch"].create({})
+        duplicate = first.copy({"batch_id": other.id, "state": "noted"})
+        # Real upgrade rows are already committed. Flush fixture changes so
+        # the failed first index attempt cannot roll them back with its cache.
+        self.env.flush_all()
+        self.registry.init_models(
+            self.cr,
+            ["ai.recon.proposal"],
+            {"module": "ai_recon_review"},
+            install=False,
+        )
+        self.registry.finalize_constraints(self.cr)
+        self.assertTrue(first.exists())
+        self.assertFalse(duplicate.exists())
+        self.assertTrue(first._one_live_per_line.matches_database(first))
+        self.assertEqual(other.count_none, 0)
+
+    def test_cleanup_prefers_a_live_human_proposal_over_a_note(self):
+        self._drop_live_index()
+        note = self.make(confidence="none")
+        note.state = "noted"
+        other = self.env["ai.recon.batch"].create({})
+        human = note.copy({"batch_id": other.id, "state": "proposed"})
+        note._gc_duplicate_observations()
+        self.assertTrue(human.exists())
+        self.assertFalse(note.exists())
+
+    def test_upgrade_refuses_to_discard_conflicting_human_proposals(self):
+        self._drop_live_index()
+        first = self.make()
+        other = self.env["ai.recon.batch"].create({})
+        second = first.copy({"batch_id": other.id})
+        with self.assertRaises(UserError):
+            first.init()
+        self.assertTrue(first.exists())
+        self.assertTrue(second.exists())
+
+    def test_clusters_include_distinct_unknowns_from_different_days(self):
+        first = self.make(confidence="none")
+        first.state = "noted"
+        earlier = self.env["ai.recon.batch"].create(
+            {"date": fields.Datetime.subtract(fields.Datetime.now(), days=1)}
+        )
+        second = self.make(
+            confidence="none",
+            line=self._fresh_line(),
+        )
+        second.write({"batch_id": earlier.id, "state": "noted"})
+        self.assertEqual(self.batch._top_clusters()[0]["count"], 2)
+        self.assertEqual(earlier._top_clusters()[0]["count"], 2)
+
+    def test_legacy_duplicates_do_not_inflate_clusters_before_cleanup(self):
+        self._drop_live_index()
+        first = self.make(confidence="none")
+        first.state = "noted"
+        other = self.env["ai.recon.batch"].create({})
+        first.copy({"batch_id": other.id, "state": "noted"})
+        self.assertFalse(self.batch._top_clusters())
+        self.assertFalse(other._top_clusters())
+
+    def test_cluster_corpus_respects_batch_companies_and_unresolved_state(self):
+        first = self.make(confidence="none")
+        second = self.make(
+            confidence="none",
+            line=self._fresh_line(),
+        )
+        (first | second).write({"state": "noted"})
+        self.assertEqual(self.batch._top_clusters()[0]["count"], 2)
+        self.batch.company_ids = self.env["res.company"].create(
+            {"name": "Other corpus company"}
+        )
+        self.assertFalse(self.batch._top_clusters())
+        self.batch.company_ids = self.company
+        second.state = "rejected"
+        self.assertFalse(self.batch._top_clusters())
