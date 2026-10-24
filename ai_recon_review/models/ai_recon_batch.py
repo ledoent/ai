@@ -106,6 +106,10 @@ class AiReconBatch(models.Model):
     def _recipients(self):
         """Who gets asked. Configured per company, deliberately not guessed."""
         self.ensure_one()
+        # pylint: disable=no-search-all
+        # Every company, deliberately: a batch with no company_ids set is the
+        # all-companies case, and silently reviewing a subset is the failure
+        # this whole design exists to avoid. There are five of them.
         companies = self.company_ids or self.env["res.company"].search([])
         return companies.mapped("ai_recon_reviewer_ids")
 
