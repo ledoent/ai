@@ -91,7 +91,7 @@ marked ``no_review`` and never enters the queue.
 
 .. code:: python
 
-   batch = env["ai.recon.batch"].create({"lines_seen": len(lines)})
+   batch = env["ai.recon.batch"].create({"items_seen": len(lines)})
    env["ai.recon.proposal"].create({
        "batch_id": batch.id,
        "statement_line_id": line.id,

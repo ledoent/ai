@@ -38,7 +38,7 @@ class ReconCommon(TransactionCase):
                 "date": fields.Date.today(),
             }
         )
-        cls.batch = cls.env["ai.recon.batch"].create({"lines_seen": 1})
+        cls.batch = cls.env["ai.recon.batch"].create({"items_seen": 1})
 
     def make(self, confidence="medium", account=None, line=None):
         return self.env["ai.recon.proposal"].create(
@@ -289,7 +289,7 @@ class TestBatchEmail(ReconCommon):
         before = self.env["mail.mail"].search_count([])
         batch = self.env["ai.recon.batch"]._cron_build_and_send()
         self.assertTrue(batch)
-        self.assertGreater(batch.lines_seen, 0)
+        self.assertGreater(batch.items_seen, 0)
         self.assertTrue(batch.proposal_ids, "every line seen gets a proposal")
         self.assertEqual(self.env["mail.mail"].search_count([]) - before, 1)
 
@@ -320,8 +320,14 @@ class TestBatchEmail(ReconCommon):
             self.make(confidence="none", line=line)
         clusters = self.batch._top_clusters()
         self.assertTrue(clusters)
-        self.assertEqual(clusters[0]["prefix"], "AMZN MKTP")
-        self.assertEqual(clusters[0]["journal"], self.journal.code)
+        # The mail contract is generic -- label and count only. The bank
+        # cluster key used to leak its own field names into the template,
+        # which coupled the email to reconciliation.
+        self.assertEqual(set(clusters[0]), {"label", "count"})
+        self.assertEqual(clusters[0]["count"], 2)
+        label = clusters[0]["label"]
+        self.assertIn("AMZN MKTP", label)
+        self.assertIn(self.journal.code, label)
 
 
 class TestReviewGatePrecondition(ReconCommon):

@@ -9,7 +9,7 @@
     "development_status": "Alpha",
     "category": "Accounting",
     "depends": [
-        "ai_agent_runtime",
+        "ai_agent_review",
         "account",
     ],
     "data": [

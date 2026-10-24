@@ -15,7 +15,7 @@
             >
                 <p>
                     Overnight reconciliation run over
-                    <strong t-out="object.lines_seen">0</strong> unreconciled lines.
+                    <strong t-out="object.items_seen">0</strong> unreconciled lines.
                 </p>
                 <p t-if="object.truncated" style="color:#b03030;">
                     <strong>Warning:</strong> the scanning user could not see every

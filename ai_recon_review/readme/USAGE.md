@@ -7,7 +7,7 @@ Give the agent its own user with `base.group_user` +
 that group, work it applies is marked `no_review` and never enters the queue.
 
 ```python
-batch = env["ai.recon.batch"].create({"lines_seen": len(lines)})
+batch = env["ai.recon.batch"].create({"items_seen": len(lines)})
 env["ai.recon.proposal"].create({
     "batch_id": batch.id,
     "statement_line_id": line.id,

@@ -1,23 +1,10 @@
 import logging
+import types
 
 from odoo import api, fields, models
 from odoo.exceptions import UserError
 
 _logger = logging.getLogger(__name__)
-
-CONFIDENCE = [
-    ("high", "Confident"),
-    ("medium", "Needs a human"),
-    ("none", "No idea"),
-]
-
-STATE = [
-    ("proposed", "Proposed"),
-    ("applied", "Applied"),
-    ("approved", "Approved"),
-    ("rejected", "Rejected"),
-    ("noted", "Noted only"),
-]
 
 
 class AiReconProposal(models.Model):
@@ -33,7 +20,16 @@ class AiReconProposal(models.Model):
 
     _name = "ai.recon.proposal"
     _description = "AI Reconciliation Proposal"
-    _order = "confidence, id"
+    _inherit = "ai.proposal.mixin"
+
+    # Bank opts into auto-applying its confident matches, and this is the only
+    # place that is defensible: a reconciliation is reversible via
+    # action_undo_reconciliation, so a wrong confident match costs cleanup
+    # rather than harm. A vertical whose action cannot be undone must not copy
+    # this line.
+    _confidence_actions = types.MappingProxyType(
+        {"high": "apply", "medium": "flag", "none": "note"}
+    )
 
     batch_id = fields.Many2one("ai.recon.batch", ondelete="cascade", index=True)
     statement_line_id = fields.Many2one(
@@ -46,9 +42,6 @@ class AiReconProposal(models.Model):
     amount = fields.Monetary(related="statement_line_id.amount")
     currency_id = fields.Many2one(related="statement_line_id.currency_id")
 
-    confidence = fields.Selection(CONFIDENCE, required=True, index=True)
-    state = fields.Selection(STATE, default="proposed", required=True, index=True)
-
     partner_id = fields.Many2one("res.partner", string="Proposed contact")
     account_id = fields.Many2one("account.account", string="Proposed account")
     reconcile_model_id = fields.Many2one(
@@ -58,11 +51,6 @@ class AiReconProposal(models.Model):
         "proposal came from the agent's own judgement -- which is exactly the "
         "case a new rule should eventually cover.",
     )
-    rationale = fields.Text(help="Why the agent proposed this, in its own words.")
-
-    approved_by = fields.Many2one("res.users", readonly=True)
-    approved_date = fields.Datetime(readonly=True)
-
     _one_open_per_line = models.Constraint(
         "UNIQUE(statement_line_id, batch_id)",
         "That statement line already has a proposal in this batch.",
@@ -138,57 +126,56 @@ class AiReconProposal(models.Model):
         self.statement_line_id.move_id.review_state = "anomaly"
         return True
 
-    # -- the gate ------------------------------------------------------------
+    # -- preconditions and hooks ---------------------------------------------
 
-    def _execute(self):
+    def _assert_preconditions(self):
+        """Bank's safety rests on a setting this code does not own."""
+        self._assert_review_gate(self.company_id)
+        return True
+
+    def _undo(self):
+        """Put the line back in suspense. This is what makes `high -> apply`
+        defensible here and nowhere else yet."""
         self.ensure_one()
-        if self.state != "approved":
-            raise UserError(
-                self.env._(
-                    "Proposal %(id)s is %(state)s, not approved. Nothing was done.",
-                    id=self.id,
-                    state=self.state,
-                )
-            )
-        self._apply()
-        self.state = "applied"
+        self.statement_line_id.action_undo_reconciliation()
         return True
 
-    def action_approve(self):
-        for proposal in self:
-            if proposal.state not in ("proposed",):
-                raise UserError(self.env._("Only a proposed line can be approved."))
-            proposal.write(
-                {
-                    "state": "approved",
-                    "approved_by": self.env.uid,
-                    "approved_date": fields.Datetime.now(),
-                }
-            )
-            proposal._execute()
-        return True
+    def _cluster_key(self):
+        """First two words of the label plus the journal.
 
-    def action_reject(self):
-        for proposal in self:
-            if proposal.state != "proposed":
-                raise UserError(self.env._("Only a proposed line can be rejected."))
-            proposal.write(
-                {
-                    "state": "rejected",
-                    "approved_by": self.env.uid,
-                    "approved_date": fields.Datetime.now(),
-                }
-            )
-        return True
+        Crude, and it shows -- on real data it produced useful keys like
+        "CLICKUP" and "CHIEF ARCHITECT" alongside noise like "OFFER 04" and
+        "OTHER FIN". A better key is a real refinement, not a tidy-up.
+        """
+        self.ensure_one()
+        label = (self.payment_ref or "").strip().upper()
+        prefix = " ".join(label.split()[:2])
+        return (prefix, self.journal_id.id) if prefix else None
 
-    def action_undo(self):
-        """Put an applied line back in suspense. Reconciliation is reversible."""
-        for proposal in self.filtered(lambda p: p.state == "applied"):
-            proposal.statement_line_id.action_undo_reconciliation()
-            proposal.state = "proposed"
-        return True
+    @api.model
+    def _cluster_label(self, key):
+        prefix, journal_id = key
+        return f"{prefix} ({self.env['account.journal'].browse(journal_id).code})"
 
-    # -- routing -------------------------------------------------------------
+    @api.model
+    def _draft_rule(self, key, proposals):
+        """An inactive reconcile model, so nothing changes until accepted.
+
+        The account is deliberately left empty: choosing it is the judgement
+        being asked for.
+        """
+        prefix, journal_id = key
+        return self.env["account.reconcile.model"].create(
+            {
+                "name": f"[proposed] {prefix}",
+                "rule_type": "reco_model",
+                "active": False,
+                "match_label": "contains",
+                "match_label_param": prefix,
+                "match_journal_ids": [fields.Command.set([journal_id])],
+                "company_id": proposals[0].company_id.id,
+            }
+        )
 
     @api.model
     def _assert_review_gate(self, companies):
@@ -227,28 +214,4 @@ class AiReconProposal(models.Model):
                     names=", ".join(inert.mapped("name")),
                 )
             )
-        return True
-
-    @api.model
-    def _route(self, proposals):
-        """Send each proposal down the path its confidence earns.
-
-        high   -- apply now, flagged unreviewed. Reconciliation is reversible
-                  (``action_undo_reconciliation``), so a wrong confident match
-                  costs cleanup, not harm.
-        medium -- touch nothing; flag the move so a human finds it.
-        none   -- record the observation and leave the line alone. These are
-                  the rule-discovery corpus, and the reason the catch-all rule
-                  must stay off: sweeping them into an "Uncategorized" account
-                  would reconcile them and destroy the signal.
-        """
-        self._assert_review_gate(proposals.company_id)
-        for proposal in proposals:
-            if proposal.confidence == "high":
-                proposal._apply()
-                proposal.state = "applied"
-            elif proposal.confidence == "medium":
-                proposal._flag_for_attention()
-            else:
-                proposal.state = "noted"
         return True

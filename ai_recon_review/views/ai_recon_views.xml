@@ -105,7 +105,7 @@
                 <sheet>
                     <group>
                         <field name="date" />
-                        <field name="lines_seen" />
+                        <field name="items_seen" />
                         <field name="truncated" />
                         <field name="count_high" />
                         <field name="count_medium" />
@@ -123,7 +123,7 @@
         <field name="arch" type="xml">
             <list>
                 <field name="name" />
-                <field name="lines_seen" />
+                <field name="items_seen" />
                 <field name="count_high" />
                 <field name="count_medium" />
                 <field name="count_none" />
