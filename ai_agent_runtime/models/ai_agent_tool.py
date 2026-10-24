@@ -88,3 +88,29 @@ class AiAgentTool(models.Model):
                 self.requires_approval,
             ]
         )
+
+    @api.model_create_multi
+    def create(self, vals_list):
+        self.env["ai.agent"]._check_admin()
+        return super().create(vals_list)
+
+    def write(self, vals):
+        self.env["ai.agent"]._check_admin()
+        self.flush_recordset()
+        self.env.cr.execute(
+            "SELECT id FROM ai_agent_tool WHERE id IN %s ORDER BY id FOR UPDATE",
+            [tuple(self.ids)],
+        )
+        result = super().write(vals)
+        if {"model_name", "method_name", "requires_approval"}.intersection(vals):
+            caps = (
+                self.env["ai.agent.capability"]
+                .sudo()
+                .search([("tool_id", "in", self.ids)])
+            )
+            caps._change("Tool target or approval policy changed.", level="observe")
+        return result
+
+    def unlink(self):
+        self.env["ai.agent"]._check_admin()
+        return super().unlink()

@@ -85,6 +85,11 @@ class AgentRuntimeCommon(TransactionCase):
             }
         )
 
+        # Existing approval tests exercise propose; new grants still default observe.
+        cls.agent._capability(cls.tool_create).action_set_level(
+            "propose", "Approval fixture"
+        )
+
     def make_run(self, *steps):
         """Create a started run from ``(tool_name, args)`` pairs."""
         plan = [{"tool": name, "args": args} for name, args in steps]

@@ -41,6 +41,11 @@ class AiAgentCall(models.Model):
     )
     approver_id = fields.Many2one("res.users", ondelete="restrict")
     result = fields.Text()
+    capability_id = fields.Many2one("ai.agent.capability", ondelete="restrict")
+    capability_epoch = fields.Integer()
+    capability_level = fields.Selection(
+        [(level, level.title()) for level in ("observe", "propose", "apply")]
+    )
     _unique_call = models.Constraint(
         "UNIQUE(run_id, sequence)", "An invocation already exists at this sequence."
     )
@@ -67,6 +72,10 @@ class AiAgentCall(models.Model):
         run, tool = self.run_id, self.tool_id
         if not tool:
             raise AccessError(self.env._("Agent is not allowed to use this tool."))
+        cap = self.capability_id
+        cap._refresh_policy()
+        if not cap or not cap.granted or cap.epoch != self.capability_epoch:
+            raise AccessError(self.env._("Capability changed; start a new invocation."))
         if (
             not tool
             or tool not in run.agent_id.tool_ids

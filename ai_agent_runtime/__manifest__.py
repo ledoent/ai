@@ -1,7 +1,7 @@
 {
     "name": "AI Agent Runtime",
     "summary": "Durable multi-step agent runs with an allowlist and an approval gate",
-    "version": "20.0.1.0.0",
+    "version": "20.0.2.0.0",
     "license": "AGPL-3",
     "author": "Odoo Community Association (OCA)",
     "maintainers": ["dnplkndll"],

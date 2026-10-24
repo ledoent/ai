@@ -147,7 +147,12 @@ class AiAgentRun(models.Model):
         return bound(**args)
 
     def _snapshot_values(self, tool, name, args):
+        cap = self.agent_id._capability(tool)
+        cap._refresh_policy()
         return {
+            "capability_id": cap.id,
+            "capability_epoch": cap.epoch,
+            "capability_level": cap.level,
             "run_id": self.id,
             "sequence": self.step_no,
             "tool_id": tool.id,
@@ -207,7 +212,15 @@ class AiAgentRun(models.Model):
         except AccessError as exc:
             call._set({"state": "refused", "result": str(exc)})
             return self._finish_call(call)
-        if tool.requires_approval and call.state != "approved":
+        if tool.classification != "readonly" and call.capability_level == "observe":
+            call._set(
+                {"state": "observed", "result": "Intent recorded; target not invoked."}
+            )
+            return self._finish_call(call, recover=recover)
+        needs_approval = tool.requires_approval or (
+            tool.classification != "readonly" and call.capability_level == "propose"
+        )
+        if needs_approval and call.state != "approved":
             self._set({"state": "awaiting_approval", "pending_call_id": call.id})
             return False
         try:
