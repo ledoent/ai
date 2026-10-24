@@ -338,3 +338,171 @@ class TestRecoverableToolFailure(AgentRuntimeCommon):
         self.assertEqual(run.state, "failed")
         self.assertIn("budget", run.error)
         self.assertEqual(len(run.step_ids), 4)
+
+
+@tagged("post_install", "-at_install")
+class TestTruncationAnnotation(AgentRuntimeCommon):
+    """Telling the model when its view is partial.
+
+    Regression test for the worst failure found in the whole exercise, on real
+    production data: asked how many posted invoices were unpaid and what they
+    totalled, a model made two *correct* tool calls and answered "1, 7097.74".
+    The true answer was 3 and 10597.74 -- the other two belonged to a company
+    its user could not see. Odoo was right; our wrapper was the liar.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.agent.provider_id = cls.env["ai.agent.provider"].create(
+            {"name": "Stub", "kind": "stub"}
+        )
+        # ir.mail_server is base.group_system-only and the agent has no such
+        # group, so this record is invisible to it. Reuse the fixture's tool for
+        # that model -- ai.agent.tool is UNIQUE(model_name, method_name).
+        cls.env["ir.mail_server"].create(
+            {"name": "hidden-from-agent", "smtp_host": "example.invalid"}
+        )
+        cls.hidden_tool = cls.tool_forbidden
+        cls.hidden_tool.report_truncation = True
+        # _annotate_result needs a real run: it reads agent_id.user_id.
+        cls.probe = cls.Run.create(
+            {"agent_id": cls.agent.id, "goal": "probe", "plan": "[]"}
+        )
+
+    def _restrict_partners(self):
+        """Hide one contact from every non-superuser, via a record restriction.
+
+        This is the shape of the production failure: the agent *can* read the
+        model, so the call succeeds -- it just silently returns fewer rows. A
+        fully-denied model is a different and much safer case, because there the
+        call raises and the model is told.
+        """
+        hidden = self.env["res.partner"].create({"name": "WITHHELD-FROM-AGENT"})
+        self.env["ir.access"].create(
+            {
+                "name": "test: hide one partner",
+                "model_id": self.env["ir.model"]._get_id("res.partner"),
+                "operation": "r",
+                "domain": "[('name', '!=', 'WITHHELD-FROM-AGENT')]",
+            }
+        )
+        self.tool_count.report_truncation = True
+        return hidden
+
+    def test_annotation_reports_withheld_records(self):
+        """A call that succeeds but under-reports says so."""
+        self._restrict_partners()
+        Partner = self.env["res.partner"]
+        visible = Partner.with_user(self.agent_user).search_count([])
+        total = Partner.sudo().search_count([])
+        self.assertLess(visible, total)  # precondition: the rule actually bites
+        rendered = self.probe._annotate_result(self.tool_count, {"domain": []}, visible)
+        self.assertIn(f"{visible} of {total}", rendered)
+        self.assertIn(f"{total - visible} are excluded", rendered)
+        self.assertIn("excluded by this user's access rights", rendered)
+        self.assertIn("partial", rendered)
+
+    def test_no_annotation_when_nothing_is_withheld(self):
+        """A tool the user can fully see gets no noise appended."""
+        self.tool_count.report_truncation = True
+        visible = self.env["res.partner"].with_user(self.agent_user).search_count([])
+        rendered = self.probe._annotate_result(self.tool_count, {"domain": []}, visible)
+        self.assertEqual(rendered, repr(visible))
+
+    def test_annotation_is_opt_in(self):
+        """Off by default, because it costs a second query."""
+        self.assertFalse(self.tool_count.report_truncation)
+        rendered = self.probe._annotate_result(self.tool_count, {"domain": []}, 7)
+        self.assertEqual(rendered, repr(7))
+
+    def test_annotation_reaches_the_transcript(self):
+        """End to end: the note has to be where the model will read it."""
+        run = self.Run.create(
+            {"agent_id": self.agent.id, "goal": "count servers", "plan": "[]"}
+        )
+        run.action_start()
+        run = run.with_context(
+            stub_script=[
+                {
+                    "kind": "tool",
+                    "tool": self.hidden_tool.name,
+                    "args": {"domain": []},
+                },
+                {"kind": "final", "answer": "done"},
+            ]
+        )
+        run.action_run_to_completion()
+        self.assertEqual(run.state, "done")
+        step = run.step_ids[0]
+        # The call itself was refused (the agent cannot read the model), and
+        # that refusal is what reaches the model -- the annotation path is for
+        # the subtler case where a call *succeeds* but under-reports.
+        self.assertTrue(step.failed)
+        self.assertIn("AccessError", step.result)
+
+    def test_annotation_never_breaks_a_call(self):
+        """A bad domain in the annotation path must not fail the step."""
+        rendered = self.probe._annotate_result(
+            self.hidden_tool, {"domain": [["no_such_field", "=", 1]]}, 0
+        )
+        self.assertEqual(rendered, repr(0))
+
+    def test_annotation_reaches_the_transcript_on_a_truncated_read(self):
+        """End to end, on the dangerous case: the note must be where the model reads."""
+        self._restrict_partners()
+        run = self.Run.create(
+            {"agent_id": self.agent.id, "goal": "count contacts", "plan": "[]"}
+        )
+        run.action_start()
+        run = run.with_context(
+            stub_script=[
+                {
+                    "kind": "tool",
+                    "tool": self.tool_count.name,
+                    "args": {"domain": []},
+                },
+                {"kind": "final", "answer": "done"},
+            ]
+        )
+        run.action_run_to_completion()
+        self.assertEqual(run.state, "done")
+        self.assertFalse(run.step_ids[0].failed)  # it SUCCEEDED, just partially
+        self.assertIn("are excluded", run.step_ids[0].result)
+        self.assertIn("are excluded", run._transcript()[0]["result"])
+
+
+@tagged("post_install", "-at_install")
+class TestArgsSnapshot(AgentRuntimeCommon):
+    """The audit trail must record what was approved, not what the ORM left.
+
+    Found on real data: res.partner.create mutates the vals dict in place
+    (adding properties_base_definition_id), so serialising args after the call
+    recorded arguments that differed from the approved ones.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.agent.provider_id = cls.env["ai.agent.provider"].create(
+            {"name": "Stub", "kind": "stub"}
+        )
+
+    def test_step_args_match_what_was_approved(self):
+        approved = {"vals_list": [{"name": "Snapshot Check"}]}
+        run = self.Run.create(
+            {"agent_id": self.agent.id, "goal": "create one", "plan": "[]"}
+        )
+        run.action_start()
+        run = run.with_context(
+            stub_script=[{"kind": "tool", "tool": "create_partner", "args": approved}]
+        )
+        run.action_run_to_completion()
+        self.assertEqual(run.state, "awaiting_approval")
+        pending = run.pending_args
+        run.action_approve()
+        run.with_context(stub_script=[])._advance()
+        self.assertEqual(len(run.step_ids), 1)
+        # The recorded args are byte-identical to what the human approved.
+        self.assertEqual(run.step_ids.args, pending)
+        self.assertNotIn("properties_base_definition_id", run.step_ids.args)

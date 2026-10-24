@@ -2,7 +2,7 @@ import inspect
 import re
 import typing
 
-from odoo import models
+from odoo import fields, models
 from odoo.models import get_public_method
 
 # reST ``:param name: text`` -- the form Odoo's own docstrings use and the one
@@ -21,6 +21,14 @@ _JSON_TYPES = {
 
 class AiAgentTool(models.Model):
     _inherit = "ai.agent.tool"
+
+    report_truncation = fields.Boolean(
+        default=False,
+        help="For a tool taking a domain, append a note saying how many "
+        "matching records the agent's user cannot see. Costs one extra query "
+        "per call. Turn it on for any read tool whose result a human might "
+        "treat as a complete total or ranking.",
+    )
 
     def _docstring_params(self, method):
         doc = inspect.getdoc(method) or ""

@@ -103,6 +103,51 @@ class AiAgentRun(models.Model):
 
         return self._run_step(tool, args)
 
+    def _annotate_result(self, tool, args, result):
+        """Render a result, telling the model when its view was truncated.
+
+        This exists because of a measured failure, not a hypothesis. Asked *"how
+        many posted customer invoices are unpaid, and what do they total?"*
+        against a real multi-company production copy, a model made two correct
+        tool calls and answered *"1 invoice, 7097.74"* — fluently, precisely,
+        and wrong. The real answer was 3 and 10597.74; the other two belonged to
+        a company the agent's user cannot see. Odoo behaved exactly as designed.
+        The defect was ours: the wrapper handed over a filtered count with
+        nothing to indicate it had been filtered.
+
+        Note what this does *not* do. ``sudo()`` cannot tell you what a user
+        would have been refused — every access predicate short-circuits under
+        ``env.su``, which ``ai_agent_surface`` demonstrates. But running the same
+        domain twice, once per identity, *can*. So the audit mode that is
+        impossible to get from one privileged call is available from two calls,
+        and that is the whole trick.
+
+        Opt-in per tool, because it costs a second query and because on a tool
+        that is already unrestricted it would be pure overhead.
+        """
+        self.ensure_one()
+        rendered = repr(result)
+        if not tool.report_truncation:
+            return rendered
+        domain = args.get("domain")
+        if not isinstance(domain, list):
+            return rendered
+        try:
+            Model = self.env[tool.model_name]
+            visible = Model.with_user(self.agent_id.user_id).search_count(domain)
+            total = Model.sudo().search_count(domain)
+        except Exception:  # noqa: BLE001 - an annotation must never break a call
+            return rendered
+        if total <= visible:
+            return rendered
+        return (
+            f"{rendered}\n"
+            f"NOTE: this result covers {visible} of {total} records matching the "
+            f"domain. {total - visible} are excluded by this user's access "
+            f"rights, so any total or ranking derived from it is partial. Say so "
+            f"in your answer rather than presenting it as complete."
+        )
+
     def _execute_pending(self):
         self.ensure_one()
         tool = self.pending_tool_id
@@ -135,6 +180,12 @@ class AiAgentRun(models.Model):
         """
         self.ensure_one()
         Step = self.env["ai.agent.run.step"]
+        # Snapshot the arguments BEFORE the call. Odoo's create() mutates the
+        # vals dict in place -- observed on real data, where res.partner.create
+        # added properties_base_definition_id -- so serialising afterwards
+        # records arguments that differ from the ones that were approved. An
+        # approval trail that misreports what was approved defeats the gate.
+        args_snapshot = json.dumps(args)
         try:
             with self.env.cr.savepoint():
                 result = self._execute_tool(tool, args)
@@ -152,7 +203,7 @@ class AiAgentRun(models.Model):
                     "run_id": self.id,
                     "sequence": self.step_no,
                     "tool_id": tool.id,
-                    "args": json.dumps(args),
+                    "args": args_snapshot,
                     "result": f"{type(exc).__name__}: {exc}"[:2000],
                     "failed": True,
                 }
@@ -175,8 +226,8 @@ class AiAgentRun(models.Model):
                 "run_id": self.id,
                 "sequence": self.step_no,
                 "tool_id": tool.id,
-                "args": json.dumps(args),
-                "result": repr(result)[:2000],
+                "args": args_snapshot,
+                "result": self._annotate_result(tool, args, result)[:2000],
             }
         )
         self.write(
