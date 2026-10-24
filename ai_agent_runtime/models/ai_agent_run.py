@@ -1,3 +1,5 @@
+# pylint: disable=method-required-super,no-raise-unlink
+# Protected audit records deliberately reject public mutation and deletion.
 import inspect
 import json
 import logging
@@ -7,48 +9,42 @@ from odoo.exceptions import AccessError, UserError
 
 _logger = logging.getLogger(__name__)
 
-STATE_SELECTION = [
-    ("draft", "Draft"),
-    ("running", "Running"),
-    ("awaiting_approval", "Awaiting approval"),
-    ("done", "Done"),
-    ("failed", "Failed"),
-    ("cancelled", "Cancelled"),
-]
-
 
 class AiAgentRun(models.Model):
-    """One durable, resumable execution of a plan.
-
-    A separate record rather than state held in a cron, because ``ir.cron``
-    offers nowhere to put it: ``_trigger`` takes no payload
-    (``odoo/addons/base/models/ir_cron.py``), so anything a job needs to
-    remember between steps has to live in a model. That is a requirement core
-    imposes, not a design preference.
-    """
-
     _name = "ai.agent.run"
     _description = "AI Agent Run"
     _order = "id desc"
 
     name = fields.Char(compute="_compute_name")
     agent_id = fields.Many2one("ai.agent", required=True, ondelete="restrict")
-    state = fields.Selection(STATE_SELECTION, default="draft", required=True)
-    plan = fields.Text(
+    state = fields.Selection(
+        [
+            (s, s.replace("_", " ").title())
+            for s in (
+                "draft",
+                "running",
+                "awaiting_approval",
+                "done",
+                "failed",
+                "cancelled",
+            )
+        ],
+        default="draft",
         required=True,
-        default="[]",
-        help='JSON list of steps, e.g. [{"tool": "count_partners", "args": {}}]. '
-        "Written by hand for now; a planner would produce it later.",
-    )
-    step_no = fields.Integer(
-        default=0,
         readonly=True,
-        help="Index of the next plan entry to execute. The resume cursor.",
     )
+    plan = fields.Text(required=True, default="[]")
+    step_no = fields.Integer(default=0, readonly=True)
     step_ids = fields.One2many("ai.agent.run.step", "run_id", readonly=True)
-    pending_tool_id = fields.Many2one("ai.agent.tool", readonly=True)
-    pending_args = fields.Text(readonly=True)
-    approver_id = fields.Many2one("res.users", readonly=True)
+    call_ids = fields.One2many("ai.agent.call", "run_id", readonly=True)
+    pending_call_id = fields.Many2one(
+        "ai.agent.call", readonly=True, ondelete="restrict"
+    )
+    pending_tool_id = fields.Many2one(related="pending_call_id.tool_id")
+    pending_args = fields.Text(related="pending_call_id.args")
+    approver_id = fields.Many2one(related="pending_call_id.approver_id")
+    execution_user_id = fields.Many2one("res.users", readonly=True, ondelete="restrict")
+    execution_context = fields.Json(readonly=True)
     error = fields.Text(readonly=True)
 
     @api.depends("agent_id", "state")
@@ -56,7 +52,53 @@ class AiAgentRun(models.Model):
         for run in self:
             run.name = f"{run.agent_id.name or '?'} #{run.id or 0}"
 
-    # -- plan access ---------------------------------------------------------
+    @api.model
+    def _control_fields(self):
+        return {
+            "state",
+            "step_no",
+            "step_ids",
+            "call_ids",
+            "pending_call_id",
+            "pending_tool_id",
+            "pending_args",
+            "approver_id",
+            "execution_user_id",
+            "execution_context",
+            "error",
+        }
+
+    @api.model_create_multi
+    def create(self, vals_list):
+        for vals in vals_list:
+            if self._control_fields().intersection(vals):
+                raise AccessError(self.env._("Run control fields are server-owned."))
+        return super().create(vals_list)
+
+    def write(self, vals):
+        if self._control_fields().intersection(vals):
+            raise AccessError(self.env._("Run control fields are server-owned."))
+        self._lock()
+        if any(run.state != "draft" for run in self):
+            raise AccessError(self.env._("Started runs are immutable."))
+        return super().write(vals)
+
+    def unlink(self):
+        if any(run.state != "draft" for run in self):
+            raise AccessError(self.env._("Started runs cannot be deleted."))
+        return super().unlink()
+
+    def _set(self, vals):
+        return super(AiAgentRun, self.sudo()).write(vals)
+
+    def _lock(self):
+        self.check_access("write")
+        self.flush_recordset()
+        self.env.cr.execute(
+            "SELECT id FROM ai_agent_run WHERE id IN %s ORDER BY id FOR UPDATE",
+            [tuple(self.ids)],
+        )
+        self.invalidate_recordset()
 
     def _plan_entries(self):
         self.ensure_one()
@@ -70,228 +112,229 @@ class AiAgentRun(models.Model):
             raise UserError(self.env._("The plan must be a JSON list of steps."))
         return entries
 
-    # -- the executor --------------------------------------------------------
-
     def _resolve_tool(self, name):
-        """Resolve a plan step's tool name against the agent's allowlist.
-
-        Deliberately resolves through ``agent_id.tool_ids`` and not through a
-        global search: a tool record existing is not authorisation to use it.
-        This is the allowlist that ``ai_agent_surface`` showed Odoo's own access
-        rights cannot express.
-        """
-        self.ensure_one()
         tool = self.agent_id._tool_by_name(name)
         if not tool:
             raise AccessError(
-                self.env._(
-                    "Agent %(agent)s is not allowed to use a tool named %(tool)s.",
-                    agent=self.agent_id.name,
-                    tool=name,
-                )
+                self.env._("Agent is not allowed to use tool %(tool)s.", tool=name)
             )
         return tool
 
-    def _execute_tool(self, tool, args):
-        """Call the tool as the agent's user. Never as sudo.
+    def _annotate_result(self, tool, args, result):
+        return repr(result)
 
-        ``with_user`` and not ``sudo``, because ``sudo()`` has no audit mode:
-        every access predicate short-circuits under ``env.su``
-        (``odoo/orm/models.py:3469``), so a sudo call cannot report what the
-        agent's own identity would have been refused. Running as the user means
-        an unauthorised call simply raises, which is the behaviour we want.
-        """
-        self.ensure_one()
-        record = self.env[tool.model_name].with_user(self.agent_id.user_id)
+    # A fresh context is required: caller flags must not reach the target.
+    # pylint: disable=context-overridden
+    def _invoke(self, call):
+        """Execute only the stored snapshot, with a clean, frozen context."""
+        record = (
+            self.env[call.model_name]
+            .with_context(dict(call.execution_context))
+            .with_user(call.user_id)
+        )
         if not self.env["ai.agent.surface"]._is_callable_remotely(
-            record, tool.method_name
+            record, call.method_name
         ):
-            # Defence in depth: ai.agent.tool's constraint already rejects
-            # these at definition time, but a method can stop being public
-            # between then and now (a module uninstall, a patch).
-            raise AccessError(
-                self.env._(
-                    "%(model)s.%(method)s is not remotely callable.",
-                    model=tool.model_name,
-                    method=tool.method_name,
-                )
-            )
-
-        bound = getattr(record, tool.method_name)
-        # Validate the arguments against the real signature before calling,
-        # the way /json/2 does (addons/rpc/controllers/json2.py:80-84, which
-        # turns a bind failure into a 422). Wrong or missing arguments are the
-        # single most likely defect in a plan -- especially once a planner
-        # rather than a human writes it -- and without this they surface as a
-        # raw TypeError that escapes the run instead of failing it cleanly with
-        # a message anyone can act on.
+            raise AccessError(self.env._("The target is no longer remotely callable."))
+        bound = getattr(record, call.method_name)
+        args = call._arguments()
         try:
             inspect.signature(bound).bind(**args)
         except TypeError as exc:
             raise UserError(
-                self.env._(
-                    "Tool %(tool)s was called with arguments that do not match "
-                    "%(model)s.%(method)s: %(err)s",
-                    tool=tool.name,
-                    model=tool.model_name,
-                    method=tool.method_name,
-                    err=exc.args[0] if exc.args else exc,
-                )
+                self.env._("Tool arguments do not match: %(err)s", err=str(exc))
             ) from exc
-
         return bound(**args)
 
-    def _advance(self):
-        """Execute at most one plan step. Returns True if there is more to do.
+    def _snapshot_values(self, tool, name, args):
+        return {
+            "run_id": self.id,
+            "sequence": self.step_no,
+            "tool_id": tool.id,
+            "tool_name": name or "(unknown)",
+            "model_name": tool.model_name,
+            "method_name": tool.method_name,
+            "policy": tool._policy_signature() if tool else False,
+            "args": json.dumps(args),
+            "user_id": self.execution_user_id.id,
+            "execution_context": self.execution_context,
+        }
 
-        One step per call, with the cursor and the step record written in the
-        same transaction, so a crash can never leave a step executed but
-        unrecorded -- or recorded twice. The unique constraint on
-        (run_id, sequence) is what makes the second case impossible rather than
-        merely unlikely.
-        """
-        self.ensure_one()
-        if self.state != "running":
-            return False
-
-        entries = self._plan_entries()
-        if self.step_no >= len(entries):
-            self.state = "done"
-            return False
-
-        entry = entries[self.step_no]
-        tool = self._resolve_tool(entry.get("tool"))
-        args = entry.get("args") or {}
-
-        if tool.requires_approval and not self.approver_id:
-            self.write(
-                {
-                    "state": "awaiting_approval",
-                    "pending_tool_id": tool.id,
-                    "pending_args": json.dumps(args),
-                }
+    def _lock_authority(self, tool):
+        self.agent_id.flush_recordset()
+        self.env.cr.execute(
+            "SELECT id FROM ai_agent WHERE id = %s FOR UPDATE", [self.agent_id.id]
+        )
+        self.agent_id.invalidate_recordset()
+        if tool:
+            tool.flush_recordset()
+            self.env.cr.execute(
+                "SELECT id FROM ai_agent_tool WHERE id = %s FOR UPDATE", [tool.id]
             )
-            return False
+            tool.invalidate_recordset()
 
-        try:
-            result = self._execute_tool(tool, args)
-        except (AccessError, UserError) as exc:
-            self.write({"state": "failed", "error": str(exc)})
-            self.env["ai.agent.run.step"].create(
-                {
-                    "run_id": self.id,
-                    "sequence": self.step_no,
-                    "tool_id": tool.id,
-                    "args": json.dumps(args),
-                    "result": str(exc),
-                    "failed": True,
-                }
-            )
-            return False
-
-        self.env["ai.agent.run.step"].create(
+    def _finish_call(self, call, recover=False):
+        self.env["ai.agent.run.step"]._new(
             {
                 "run_id": self.id,
-                "sequence": self.step_no,
-                "tool_id": tool.id,
-                "args": json.dumps(args),
-                "result": repr(result)[:2000],
+                "sequence": call.sequence,
+                "call_id": call.id,
+                "tool_id": call.tool_id.id,
+                "args": call.args,
+                "result": call.result,
+                "failed": call.state in ("failed", "refused"),
+                "dispatch_state": call.state,
             }
         )
-        self.write(
-            {
-                "step_no": self.step_no + 1,
-                # An approval authorises one step, not the rest of the run.
-                "approver_id": False,
-                "pending_tool_id": False,
-                "pending_args": False,
-            }
-        )
-        if self.step_no >= len(entries):
-            self.state = "done"
-            return False
-        return True
+        vals = {"step_no": self.step_no + 1, "pending_call_id": False}
+        if call.state == "refused" or (call.state == "failed" and not recover):
+            vals.update(state="failed", error=call.result)
+        self._set(vals)
+        return self.state == "running"
 
-    # -- user-facing transitions --------------------------------------------
+    def _dispatch(self, name=None, args=None, recover=False):
+        """The only boundary shared by static, model-selected and approved calls."""
+        self.ensure_one()
+        call = self.pending_call_id
+        tool = call.tool_id if call else self.agent_id._tool_by_name(name)
+        self._lock_authority(tool)
+        if not call:
+            call = self.env["ai.agent.call"]._new(
+                self._snapshot_values(tool, name, args or {})
+            )
+        try:
+            call._validate()
+        except AccessError as exc:
+            call._set({"state": "refused", "result": str(exc)})
+            return self._finish_call(call)
+        if tool.requires_approval and call.state != "approved":
+            self._set({"state": "awaiting_approval", "pending_call_id": call.id})
+            return False
+        try:
+            with self.env.cr.savepoint():
+                result = self._invoke(call)
+                rendered = self._annotate_result(tool, call._arguments(), result)[:2000]
+        except Exception as exc:  # noqa: BLE001 - recoverable tool errors
+            call._set(
+                {"state": "failed", "result": f"{type(exc).__name__}: {exc}"[:2000]}
+            )
+        else:
+            call._set({"state": "dispatched", "result": rendered})
+        return self._finish_call(call, recover=recover)
+
+    def _advance(self):
+        self.ensure_one()
+        self._lock()
+        if self.state != "running":
+            return False
+        entries = self._plan_entries()
+        if self.step_no >= len(entries):
+            self._set({"state": "done"})
+            return False
+        entry = entries[self.step_no]
+        more = self._dispatch(entry.get("tool"), entry.get("args") or {})
+        if more and self.step_no >= len(entries):
+            self._set({"state": "done"})
+            return False
+        return more
+
+    def _start_values(self):
+        user = self.agent_id.user_id
+        return {
+            "state": "running",
+            "execution_user_id": user.id,
+            "execution_context": {
+                "allowed_company_ids": user.company_ids.ids,
+                "lang": user.lang,
+                "tz": user.tz,
+            },
+        }
 
     def action_start(self):
+        self._lock()
         for run in self:
-            if run.state not in ("draft", "awaiting_approval"):
-                raise UserError(
-                    self.env._("Run %(name)s is not startable.", name=run.name)
-                )
-            run.state = "running"
+            if run.state != "draft":
+                raise UserError(self.env._("Only draft runs can be started."))
+            run._set(run._start_values())
         return True
 
     def action_approve(self):
-        """Approve exactly the pending step, then continue."""
+        self._lock()
         for run in self:
             if run.state != "awaiting_approval":
-                raise UserError(
-                    self.env._("Run %(name)s is not awaiting approval.", name=run.name)
-                )
-            run.write({"approver_id": self.env.uid, "state": "running"})
+                raise UserError(self.env._("This run is not awaiting approval."))
+            run.pending_call_id._set({"approver_id": self.env.uid, "state": "approved"})
+            run._set({"state": "running"})
         return True
 
     def action_reject(self):
+        self._lock()
         for run in self:
             if run.state != "awaiting_approval":
-                raise UserError(
-                    self.env._("Run %(name)s is not awaiting approval.", name=run.name)
-                )
-            run.write({"state": "cancelled", "error": "Rejected by approver."})
+                raise UserError(self.env._("This run is not awaiting approval."))
+            run.pending_call_id._set(
+                {"state": "refused", "result": "Rejected by reviewer."}
+            )
+            run._set({"state": "cancelled", "error": "Rejected by reviewer."})
         return True
 
     def action_run_to_completion(self):
-        """Drain this run synchronously. Convenience for tests and the UI."""
         for run in self:
             while run._advance():
                 pass
         return True
 
-    # -- the drain -----------------------------------------------------------
-
     @api.model
     def _cron_drain(self):
-        """Advance every running run, one step at a time, committing as we go.
-
-        Uses ``_commit_progress`` so a long queue is drained across several cron
-        acquisitions instead of monopolising one worker: core's own
-        ``sale.order._cron_send_pending_emails`` is the reference shape. Note
-        this does **not** make runs concurrent -- one cron definition is still
-        one execution at a time, which is a property of ``_acquire_one_job``
-        locking a single ``ir_cron`` row. Quantifying that is E1's job.
-        """
         runs = self.search([("state", "=", "running")])
         Cron = self.env["ir.cron"]
         Cron._commit_progress(remaining=len(runs))
         for run in runs:
-            run = run.with_prefetch()
             try:
-                run.action_run_to_completion()
+                with self.env.cr.savepoint():
+                    run.action_run_to_completion()
             except Exception:
                 _logger.exception("ai.agent.run %s drain failed", run.id)
-                run.write({"state": "failed", "error": "Unhandled error; see log."})
+                run._set({"state": "failed", "error": "Unhandled error; see log."})
             if not Cron._commit_progress(processed=1):
                 break
         return True
 
 
 class AiAgentRunStep(models.Model):
-    """The audit trail: one row per executed step, append-only in practice."""
-
     _name = "ai.agent.run.step"
     _description = "AI Agent Run Step"
     _order = "run_id, sequence"
 
-    run_id = fields.Many2one("ai.agent.run", required=True, ondelete="cascade")
+    run_id = fields.Many2one("ai.agent.run", required=True, ondelete="restrict")
     sequence = fields.Integer(required=True)
-    tool_id = fields.Many2one("ai.agent.tool", required=True, ondelete="restrict")
+    tool_id = fields.Many2one("ai.agent.tool", ondelete="restrict")
+    call_id = fields.Many2one("ai.agent.call", ondelete="restrict")
     args = fields.Text()
     result = fields.Text()
     failed = fields.Boolean(default=False)
-
-    _unique_step = models.Constraint(
-        "UNIQUE(run_id, sequence)",
-        "A step with that sequence has already been recorded for this run.",
+    dispatch_state = fields.Selection(
+        [
+            (s, s.title())
+            for s in ("legacy", "observed", "refused", "failed", "dispatched")
+        ],
+        default="legacy",
+        required=True,
     )
+    _unique_step = models.Constraint(
+        "UNIQUE(run_id, sequence)", "Step already recorded."
+    )
+
+    @api.model_create_multi
+    def create(self, vals_list):
+        raise AccessError(self.env._("Audit rows are server-owned."))
+
+    def write(self, vals):
+        raise AccessError(self.env._("Audit rows are immutable."))
+
+    def unlink(self):
+        raise AccessError(self.env._("Audit history cannot be deleted."))
+
+    @api.model
+    def _new(self, vals):
+        return super(AiAgentRunStep, self.sudo()).create(vals)

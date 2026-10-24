@@ -1,4 +1,4 @@
-from odoo.exceptions import AccessError, ValidationError
+from odoo.exceptions import ValidationError
 from odoo.tests import tagged
 
 from .common import AgentRuntimeCommon
@@ -25,10 +25,10 @@ class TestAuthorisation(AgentRuntimeCommon):
         allowlist stops it.
         """
         run = self.make_run(("count_users", {"domain": []}))
-        with self.assertRaises(AccessError):
-            run._advance()
-        self.assertFalse(run.step_ids)
-        self.assertEqual(run.step_no, 0)
+        run._advance()
+        self.assertEqual(run.state, "failed")
+        self.assertEqual(run.call_ids.state, "refused")
+        self.assertEqual(run.step_no, 1)
 
     def test_allowlisted_tool_still_obeys_access_rights(self):
         """And the mirror: the allowlist does not grant access rights.

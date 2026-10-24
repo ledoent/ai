@@ -120,7 +120,7 @@ class TestResume(AgentRuntimeCommon):
             mute_logger("odoo.sql_db"),
             self.cr.savepoint(),
         ):
-            self.env["ai.agent.run.step"].create(
+            self.env["ai.agent.run.step"]._new(
                 {
                     "run_id": run.id,
                     "sequence": 0,

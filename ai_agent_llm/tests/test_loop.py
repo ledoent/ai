@@ -88,7 +88,7 @@ class TestGoalLoop(AgentRuntimeCommon):
         run.action_run_to_completion()
         self.assertEqual(run.state, "failed")
         self.assertIn("not allowed", run.error)
-        self.assertFalse(run.step_ids)
+        self.assertEqual(run.call_ids.state, "refused")
 
     def test_model_cannot_invent_a_tool_name(self):
         run = self.goal_run(
@@ -97,7 +97,7 @@ class TestGoalLoop(AgentRuntimeCommon):
         )
         run.action_run_to_completion()
         self.assertEqual(run.state, "failed")
-        self.assertFalse(run.step_ids)
+        self.assertEqual(run.call_ids.state, "refused")
 
     def test_model_choice_still_runs_as_the_agents_user(self):
         """Identity is unchanged by who picked the tool."""

@@ -1,3 +1,5 @@
+import json
+
 from odoo import api, fields, models
 from odoo.exceptions import ValidationError
 
@@ -75,3 +77,14 @@ class AiAgentTool(models.Model):
                         method=tool.method_name,
                     )
                 )
+
+    def _policy_signature(self):
+        self.ensure_one()
+        return json.dumps(
+            [
+                self.model_name,
+                self.method_name,
+                self.classification,
+                self.requires_approval,
+            ]
+        )
