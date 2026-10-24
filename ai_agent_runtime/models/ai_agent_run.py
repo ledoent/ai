@@ -1,4 +1,4 @@
-# pylint: disable=method-required-super,no-raise-unlink
+# pylint: disable=method-required-super,no-raise-unlink,context-overridden
 # Protected audit records deliberately reject public mutation and deletion.
 import inspect
 import json
@@ -71,7 +71,10 @@ class AiAgentRun(models.Model):
     @api.model_create_multi
     def create(self, vals_list):
         for vals in vals_list:
-            if self._control_fields().intersection(vals):
+            if self._control_fields().intersection(vals) or any(
+                "default_" + field in self.env.context
+                for field in self._control_fields()
+            ):
                 raise AccessError(self.env._("Run control fields are server-owned."))
         return super().create(vals_list)
 
@@ -127,11 +130,7 @@ class AiAgentRun(models.Model):
     # pylint: disable=context-overridden
     def _invoke(self, call):
         """Execute only the stored snapshot, with a clean, frozen context."""
-        record = (
-            self.env[call.model_name]
-            .with_context(dict(call.execution_context))
-            .with_user(call.user_id)
-        )
+        record = call._execution_record()
         if not self.env["ai.agent.surface"]._is_callable_remotely(
             record, call.method_name
         ):
@@ -225,7 +224,18 @@ class AiAgentRun(models.Model):
             return False
         try:
             with self.env.cr.savepoint():
+                adapter = tool._undo_adapter()
+                prepared = (
+                    adapter.prepare(call._execution_record(), call._arguments())
+                    if adapter
+                    else None
+                )
                 result = self._invoke(call)
+                if adapter:
+                    receipt = adapter.capture(
+                        call._execution_record(), prepared, result
+                    )
+                    call._set({"receipt": json.loads(json.dumps(receipt))})
                 rendered = self._annotate_result(tool, call._arguments(), result)[:2000]
         except Exception as exc:  # noqa: BLE001 - recoverable tool errors
             call._set(
@@ -346,4 +356,4 @@ class AiAgentRunStep(models.Model):
 
     @api.model
     def _new(self, vals):
-        return super(AiAgentRunStep, self.sudo()).create(vals)
+        return super(AiAgentRunStep, self.sudo().with_context({})).create(vals)

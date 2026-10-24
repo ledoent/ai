@@ -3,6 +3,8 @@ import json
 from odoo import api, fields, models
 from odoo.exceptions import ValidationError
 
+from ..adapters import ReversalAdapter
+
 
 class AiAgentTool(models.Model):
     """One curated, named capability an agent may be granted.
@@ -78,14 +80,32 @@ class AiAgentTool(models.Model):
                     )
                 )
 
+    def _undo_adapter(self):
+        self.ensure_one()
+        if self.model_name not in self.env:
+            return None
+        record = self.env[self.model_name]
+        hook = getattr(record, "_ai_reversal_adapter", None)
+        adapter = hook(self.method_name) if hook else None
+        if (
+            isinstance(adapter, ReversalAdapter)
+            and adapter.target == (self.model_name, self.method_name)
+            and adapter.contract_id
+            and adapter.database_local
+        ):
+            return adapter
+        return None
+
     def _policy_signature(self):
         self.ensure_one()
+        adapter = self._undo_adapter()
         return json.dumps(
             [
                 self.model_name,
                 self.method_name,
                 self.classification,
                 self.requires_approval,
+                adapter.contract_id if adapter else None,
             ]
         )
 

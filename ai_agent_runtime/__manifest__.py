@@ -10,6 +10,7 @@
     "category": "Productivity/AI",
     "depends": [
         "ai_agent_surface",
+        "mail",
     ],
     "data": [
         "security/groups.xml",

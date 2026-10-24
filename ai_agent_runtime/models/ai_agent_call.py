@@ -1,4 +1,4 @@
-# pylint: disable=method-required-super,no-raise-unlink
+# pylint: disable=method-required-super,no-raise-unlink,context-overridden
 # Protected audit records deliberately reject public mutation and deletion.
 import json
 
@@ -34,6 +34,7 @@ class AiAgentCall(models.Model):
                 "refused",
                 "failed",
                 "dispatched",
+                "undone",
             )
         ],
         required=True,
@@ -41,6 +42,12 @@ class AiAgentCall(models.Model):
     )
     approver_id = fields.Many2one("res.users", ondelete="restrict")
     result = fields.Text()
+    receipt = fields.Json()
+    undo_state = fields.Selection(
+        [(s, s.title()) for s in ("none", "requested", "failed", "done")],
+        default="none",
+    )
+    undo_error = fields.Text()
     capability_id = fields.Many2one("ai.agent.capability", ondelete="restrict")
     capability_epoch = fields.Integer()
     capability_level = fields.Selection(
@@ -62,7 +69,7 @@ class AiAgentCall(models.Model):
 
     @api.model
     def _new(self, vals):
-        return super(AiAgentCall, self.sudo()).create(vals)
+        return super(AiAgentCall, self.sudo().with_context({})).create(vals)
 
     def _set(self, vals):
         return super(AiAgentCall, self.sudo()).write(vals)
@@ -72,6 +79,11 @@ class AiAgentCall(models.Model):
         run, tool = self.run_id, self.tool_id
         if not tool:
             raise AccessError(self.env._("Agent is not allowed to use this tool."))
+        record = self._execution_record()
+        if not self.env["ai.agent.surface"]._is_callable_remotely(
+            record, self.method_name
+        ):
+            raise AccessError(self.env._("The target is no longer remotely callable."))
         cap = self.capability_id
         cap._refresh_policy()
         if not cap or not cap.granted or cap.epoch != self.capability_epoch:
@@ -125,6 +137,7 @@ class AiAgentCall(models.Model):
                 self.run_id._set(
                     {"state": "cancelled", "error": "Rejected by reviewer."}
                 )
+        self.capability_id._check_demotion()
         return True
 
     def action_accept(self, reason=""):
@@ -135,4 +148,49 @@ class AiAgentCall(models.Model):
     def action_reject(self, reason=""):
         for call in self:
             call._judge("reject", reason)
+        return True
+
+    def _execution_record(self):
+        # pylint: disable=context-overridden
+        return (
+            self.env[self.model_name]
+            .with_context(dict(self.execution_context))
+            .with_user(self.user_id)
+        )
+
+    def action_undo(self, reason):
+        if not reason or not reason.strip():
+            raise UserError(self.env._("An undo reason is required."))
+        for call in self:
+            call._review_lock()
+            if call.state != "dispatched" or call.undo_state != "none":
+                raise UserError(self.env._("Only an applied call can be undone once."))
+            self.env["ai.agent.evidence"]._record(call, "undo", "request", reason)
+            cap = call.capability_id
+            # The downgrade must survive a failed reversal savepoint.
+            cap._change(
+                "Undo requested: " + reason,
+                level="propose" if cap.level == "apply" else cap.level,
+            )
+            call._set({"undo_state": "requested"})
+            try:
+                with self.env.cr.savepoint():
+                    adapter = call.tool_id._undo_adapter()
+                    if (
+                        not adapter
+                        or call.policy != call.tool_id._policy_signature()
+                        or call.receipt is False
+                    ):
+                        raise UserError(
+                            self.env._(
+                                "No matching reversal receipt; manual repair required."
+                            )
+                        )
+                    adapter.reverse(call._execution_record(), call.receipt)
+            except Exception as exc:  # noqa: BLE001 - preserve demotion and applied state
+                call._set({"undo_state": "failed", "undo_error": str(exc)[:2000]})
+            else:
+                call._set(
+                    {"state": "undone", "undo_state": "done", "undo_error": False}
+                )
         return True

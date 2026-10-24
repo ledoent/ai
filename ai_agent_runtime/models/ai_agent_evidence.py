@@ -1,4 +1,4 @@
-# pylint: disable=method-required-super,no-raise-unlink
+# pylint: disable=method-required-super,no-raise-unlink,context-overridden
 # Reviewer evidence is append-only and can only be created by private methods.
 from odoo import api, fields, models
 from odoo.exceptions import AccessError
@@ -46,7 +46,7 @@ class AiAgentEvidence(models.Model):
 
     @api.model
     def _record(self, call, kind, verdict, reason):
-        return super(AiAgentEvidence, self.sudo()).create(
+        return super(AiAgentEvidence, self.sudo().with_context({})).create(
             {
                 "call_id": call.id,
                 "capability_id": call.capability_id.id,

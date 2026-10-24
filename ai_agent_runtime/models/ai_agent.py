@@ -47,6 +47,23 @@ class AiAgent(models.Model):
         self.ensure_one()
         return self.tool_ids.filtered(lambda t: t.name == name)[:1]
 
+    promotion_samples = fields.Integer(default=20, required=True)
+    promotion_rate = fields.Float(default=90.0, required=True)
+    rejection_limit = fields.Integer(default=3, required=True)
+    irreversible_guard = fields.Boolean(default=True)
+
+    @api.constrains("promotion_samples", "promotion_rate", "rejection_limit")
+    def _check_thresholds(self):
+        for agent in self:
+            if (
+                agent.promotion_samples < 1
+                or agent.rejection_limit < 1
+                or not 0 <= agent.promotion_rate <= 100
+            ):
+                raise ValidationError(
+                    self.env._("Invalid capability evidence thresholds.")
+                )
+
     reviewer_ids = fields.Many2many("res.users", string="Assigned reviewers")
 
     capability_ids = fields.One2many("ai.agent.capability", "agent_id", readonly=True)
@@ -86,7 +103,14 @@ class AiAgent(models.Model):
         result = super().write(vals)
         if "tool_ids" in vals:
             self._sync_grants()
-        if "user_id" in vals or "active" in vals:
+        if {
+            "user_id",
+            "active",
+            "promotion_samples",
+            "promotion_rate",
+            "rejection_limit",
+            "irreversible_guard",
+        }.intersection(vals):
             self.capability_ids._change(
                 "Execution identity or active status changed.", level="observe"
             )
