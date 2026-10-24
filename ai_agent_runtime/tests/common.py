@@ -23,6 +23,7 @@ class AgentRuntimeCommon(TransactionCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
+        cls.env.ref("ai_agent_runtime.group_ai_reviewer").user_ids += cls.env.user
         cls.agent_user = new_test_user(
             cls.env,
             login="agent_runner",
@@ -70,6 +71,7 @@ class AgentRuntimeCommon(TransactionCase):
         cls.agent = cls.env["ai.agent"].create(
             {
                 "name": "Test Agent",
+                "reviewer_ids": [(4, cls.env.uid)],
                 "user_id": cls.agent_user.id,
                 "tool_ids": [
                     (

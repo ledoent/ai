@@ -3,7 +3,7 @@
 import json
 
 from odoo import api, fields, models
-from odoo.exceptions import AccessError
+from odoo.exceptions import AccessError, UserError
 
 
 class AiAgentCall(models.Model):
@@ -95,3 +95,44 @@ class AiAgentCall(models.Model):
     def _arguments(self):
         self.ensure_one()
         return json.loads(self.args)
+
+    evidence_ids = fields.One2many("ai.agent.evidence", "call_id", readonly=True)
+
+    def _review_lock(self):
+        self.ensure_one()
+        self.check_access("read")
+        self.run_id._lock()
+        self.run_id._lock_authority(self.tool_id)
+        self.capability_id._lock()
+        self.invalidate_recordset()
+        self.agent_id._check_reviewer()
+
+    def _judge(self, verdict, reason):
+        self._review_lock()
+        if self.state not in ("observed", "pending") or self.evidence_ids.filtered(
+            lambda e: e.kind == "judgment"
+        ):
+            raise UserError(self.env._("This call cannot be judged again."))
+        self.env["ai.agent.evidence"]._record(self, "judgment", verdict, reason)
+        self._set({"approver_id": self.env.uid})
+        if self.state == "pending":
+            if verdict == "accept":
+                self._set({"state": "approved"})
+                self.run_id._set({"state": "running"})
+            else:
+                self._set({"state": "refused", "result": "Rejected by reviewer."})
+                self.run_id._finish_call(self)
+                self.run_id._set(
+                    {"state": "cancelled", "error": "Rejected by reviewer."}
+                )
+        return True
+
+    def action_accept(self, reason=""):
+        for call in self:
+            call._judge("accept", reason)
+        return True
+
+    def action_reject(self, reason=""):
+        for call in self:
+            call._judge("reject", reason)
+        return True

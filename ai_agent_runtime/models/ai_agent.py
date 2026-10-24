@@ -47,6 +47,8 @@ class AiAgent(models.Model):
         self.ensure_one()
         return self.tool_ids.filtered(lambda t: t.name == name)[:1]
 
+    reviewer_ids = fields.Many2many("res.users", string="Assigned reviewers")
+
     capability_ids = fields.One2many("ai.agent.capability", "agent_id", readonly=True)
 
     @api.model
@@ -128,3 +130,20 @@ class AiAgent(models.Model):
     def unlink(self):
         self._check_admin()
         return super().unlink()
+
+    def _check_reviewer(self):
+        self.ensure_one()
+        if (
+            not self.env.user.has_group("ai_agent_runtime.group_ai_reviewer")
+            or self.env.user not in self.with_context(active_test=False).reviewer_ids
+            or self.sudo()
+            .with_context(active_test=False)
+            .search_count(
+                [
+                    ("user_id", "=", self.env.uid),
+                ]
+            )
+        ):
+            raise AccessError(
+                self.env._("Review requires an assigned human AI reviewer.")
+            )

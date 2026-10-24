@@ -68,7 +68,7 @@ class TestApprovalGate(AgentRuntimeCommon):
         run._advance()
         run.action_reject()
         self.assertEqual(run.state, "cancelled")
-        self.assertFalse(run.step_ids)
+        self.assertEqual(run.step_ids.dispatch_state, "refused")
         self.assertEqual(
             self.env["res.partner"].search_count([("name", "=", "Rejected")]), 0
         )

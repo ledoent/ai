@@ -3,3 +3,4 @@ from . import test_authorisation
 from . import test_snapshots
 
 from . import test_capabilities
+from . import test_reviewers

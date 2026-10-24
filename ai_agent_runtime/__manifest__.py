@@ -12,7 +12,9 @@
         "ai_agent_surface",
     ],
     "data": [
+        "security/groups.xml",
         "security/ir.access.csv",
+        "security/scope.xml",
         "views/ai_agent_views.xml",
         "views/ai_agent_run_views.xml",
         "data/ir_cron.xml",

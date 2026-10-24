@@ -276,8 +276,7 @@ class AiAgentRun(models.Model):
         for run in self:
             if run.state != "awaiting_approval":
                 raise UserError(self.env._("This run is not awaiting approval."))
-            run.pending_call_id._set({"approver_id": self.env.uid, "state": "approved"})
-            run._set({"state": "running"})
+            run.pending_call_id.action_accept()
         return True
 
     def action_reject(self):
@@ -285,10 +284,7 @@ class AiAgentRun(models.Model):
         for run in self:
             if run.state != "awaiting_approval":
                 raise UserError(self.env._("This run is not awaiting approval."))
-            run.pending_call_id._set(
-                {"state": "refused", "result": "Rejected by reviewer."}
-            )
-            run._set({"state": "cancelled", "error": "Rejected by reviewer."})
+            run.pending_call_id.action_reject()
         return True
 
     def action_run_to_completion(self):
