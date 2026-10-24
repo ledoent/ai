@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="UTF-8" ?>
-<odoo>
+<!-- noupdate: once this exists, its schedule and active flag belong to
+     whoever configured them. Without it every module upgrade reloads the
+     record and silently switches the job back off, which is how a nightly
+     batch quietly stops arriving. -->
+<odoo noupdate="1">
     <!-- Inactive by default: a module install should not start emailing
          people on a schedule. Activate it, and set the interval, deliberately. -->
     <record id="ir_cron_recon_batch" model="ir.cron">
