@@ -322,3 +322,64 @@ class TestBatchEmail(ReconCommon):
         self.assertTrue(clusters)
         self.assertEqual(clusters[0]["prefix"], "AMZN MKTP")
         self.assertEqual(clusters[0]["journal"], self.journal.code)
+
+
+class TestReviewGatePrecondition(ReconCommon):
+    """The separation of duties is conditional on a setting we do not own.
+
+    `_check_review_state_access` returns immediately when
+    `set_to_review_documents` is off (account_move.py:3940), and that Boolean
+    has no default, so off is the shipped state. Measured: with it off, a user
+    holding only group_account_invoice writes 'reviewed' without error.
+
+    The earlier claim that the agent "structurally cannot sign off" was
+    therefore true only because this test class's fixture turns the setting on.
+    These tests pin both halves: the gate really is inert when off, and the
+    agent refuses to run in that state rather than operating without it.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.agent_user = new_test_user(
+            cls.env,
+            login="gate_probe",
+            groups="base.group_user,account.group_account_invoice",
+        )
+
+    def test_core_gate_is_inert_when_the_setting_is_off(self):
+        """Documents the hole, so nobody re-derives the wrong conclusion."""
+        self.company.set_to_review_documents = False
+        move = self.st_line.move_id.with_user(self.agent_user)
+        move.review_state = "reviewed"  # no AccessError
+        self.assertEqual(move.review_state, "reviewed")
+
+    def test_core_gate_holds_when_the_setting_is_on(self):
+        self.company.set_to_review_documents = True
+        move = self.st_line.move_id.with_user(self.agent_user)
+        with self.assertRaises(AccessError):
+            move.review_state = "reviewed"
+
+    def test_routing_refuses_when_the_gate_is_inert(self):
+        """Fail closed: no gate, no agent."""
+        self.company.set_to_review_documents = False
+        proposal = self.make(confidence="high")
+        with self.assertRaises(UserError):
+            self.env["ai.recon.proposal"]._route(proposal)
+
+    def test_refusal_names_the_offending_company(self):
+        self.company.set_to_review_documents = False
+        proposal = self.make(confidence="high")
+        with self.assertRaises(UserError) as caught:
+            self.env["ai.recon.proposal"]._route(proposal)
+        self.assertIn(self.company.name, str(caught.exception))
+
+    def test_nothing_is_written_when_it_refuses(self):
+        self.company.set_to_review_documents = False
+        suspense = self.journal.suspense_account_id
+        proposal = self.make(confidence="high")
+        with self.assertRaises(UserError):
+            self.env["ai.recon.proposal"]._route(proposal)
+        self.st_line.invalidate_recordset()
+        self.assertIn(suspense, self.st_line.line_ids.account_id)
+        self.assertEqual(proposal.state, "proposed")

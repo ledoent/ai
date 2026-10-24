@@ -191,6 +191,45 @@ class AiReconProposal(models.Model):
     # -- routing -------------------------------------------------------------
 
     @api.model
+    def _assert_review_gate(self, companies):
+        """Refuse to run where the review gate is inert.
+
+        The separation of duties this module relies on -- the agent may write
+        'todo'/'anomaly' but not 'reviewed' -- is enforced by
+        ``_check_review_state_access`` (``account_move.py:3932``). That method
+        short-circuits on its first line when ``set_to_review_documents`` is
+        off on either the move's company or ``env.company``:
+
+            if self.env.su or not all(self.mapped('set_to_review_documents')) \
+               or not self.env.company.set_to_review_documents:
+                return
+
+        ``set_to_review_documents`` is a plain Boolean with no default
+        (``company.py:273``), so **off is the shipped state**, and with it off a
+        user holding only ``group_account_invoice`` can write 'reviewed'
+        freely. Measured, not inferred.
+
+        So the guarantee is conditional on a setting this module does not own.
+        Rather than document that and hope, the agent refuses to operate where
+        the gate is inert -- which makes the guarantee unconditional in
+        practice, because there is no configuration in which the agent runs
+        and the gate does not hold.
+        """
+        inert = companies.filtered(lambda c: not c.set_to_review_documents)
+        if inert:
+            raise UserError(
+                self.env._(
+                    "Review data ('Accounting Firms mode') is off for: "
+                    "%(names)s.\n\nWith it off, Odoo skips the access check "
+                    "that stops this agent marking its own work reviewed, so "
+                    "the agent will not run. Turn it on in Settings -> "
+                    "Accounting for those companies.",
+                    names=", ".join(inert.mapped("name")),
+                )
+            )
+        return True
+
+    @api.model
     def _route(self, proposals):
         """Send each proposal down the path its confidence earns.
 
@@ -203,6 +242,7 @@ class AiReconProposal(models.Model):
                   must stay off: sweeping them into an "Uncategorized" account
                   would reconcile them and destroy the signal.
         """
+        self._assert_review_gate(proposals.company_id)
         for proposal in proposals:
             if proposal.confidence == "high":
                 proposal._apply()
