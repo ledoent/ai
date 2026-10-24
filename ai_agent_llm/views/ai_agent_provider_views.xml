@@ -50,7 +50,11 @@
         <field name="inherit_id" ref="ai_agent_runtime.ai_agent_run_view_form" />
         <field name="arch" type="xml">
             <field name="plan" position="before">
-                <field name="goal" placeholder="What should the agent accomplish?" />
+                <field
+                    name="goal"
+                    placeholder="What should the agent accomplish?"
+                    readonly="state != 'draft'"
+                />
                 <field name="answer" invisible="not answer" />
             </field>
         </field>

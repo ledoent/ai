@@ -79,6 +79,10 @@ class AiAgentCall(models.Model):
         run, tool = self.run_id, self.tool_id
         if not tool:
             raise AccessError(self.env._("Agent is not allowed to use this tool."))
+        if self.model_name not in self.env:
+            raise AccessError(
+                self.env._("The invocation target is no longer installed.")
+            )
         record = self._execution_record()
         if not self.env["ai.agent.surface"]._is_callable_remotely(
             record, self.method_name
@@ -86,7 +90,13 @@ class AiAgentCall(models.Model):
             raise AccessError(self.env._("The target is no longer remotely callable."))
         cap = self.capability_id
         cap._refresh_policy()
-        if not cap or not cap.granted or cap.epoch != self.capability_epoch:
+        if (
+            not cap
+            or not cap.granted
+            or cap.epoch != self.capability_epoch
+            or cap.agent_id != run.agent_id
+            or cap.tool_id != tool
+        ):
             raise AccessError(self.env._("Capability changed; start a new invocation."))
         if (
             not tool
@@ -116,6 +126,10 @@ class AiAgentCall(models.Model):
         self.run_id._lock()
         self.run_id._lock_authority(self.tool_id)
         self.capability_id._lock()
+        self.flush_recordset()
+        self.env.cr.execute(
+            "SELECT id FROM ai_agent_call WHERE id = %s FOR UPDATE", [self.id]
+        )
         self.invalidate_recordset()
         self.agent_id._check_reviewer()
 
@@ -194,3 +208,8 @@ class AiAgentCall(models.Model):
                     {"state": "undone", "undo_state": "done", "undo_error": False}
                 )
         return True
+
+    def action_open_undo(self):
+        self.ensure_one()
+        self.check_access("read")
+        return self.env["ai.agent.authority.wizard"]._open("undo", call=self)

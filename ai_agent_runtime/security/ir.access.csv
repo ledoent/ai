@@ -10,3 +10,5 @@ access_ai_agent_run_step_system,ai_agent_run_step system,ai.agent.run.step,base.
 access_ai_agent_call_user,ai_agent_call user,ai.agent.call,base.group_user,r,
 access_ai_agent_capability_user,ai_agent_capability user,ai.agent.capability,base.group_user,r,
 access_ai_agent_evidence_user,ai_agent_evidence user,ai.agent.evidence,base.group_user,r,
+access_ai_agent_authority_wizard_reviewer,ai_agent_authority_wizard reviewer,ai.agent.authority.wizard,ai_agent_runtime.group_ai_reviewer,crud,
+access_ai_agent_authority_wizard_system,ai_agent_authority_wizard system,ai.agent.authority.wizard,base.group_system,crud,

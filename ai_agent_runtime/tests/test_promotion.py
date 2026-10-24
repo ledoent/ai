@@ -146,3 +146,15 @@ class TestPromotion(AgentRuntimeCommon):
         with self.assertRaises(UserError):
             call.action_undo("Again")
         self.assertEqual(len(call.evidence_ids.filtered(lambda e: e.kind == "undo")), 1)
+
+    def test_three_rejections_remove_apply_authority(self):
+        cap = self.agent._capability(self.tool_create)
+        cap.action_set_level("apply", "Review-gated apply fixture")
+        for _index in range(3):
+            run = self.make_run(
+                ("create_partner", {"vals_list": [{"name": "Negative apply"}]})
+            )
+            run._advance()
+            run.action_reject()
+        self.assertEqual(cap.level, "propose")
+        self.assertEqual(cap._statistics()["rejections"], 0)

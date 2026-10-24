@@ -85,3 +85,36 @@ class TestCapabilities(AgentRuntimeCommon):
                 record.with_user(self.agent_user).with_context(internal=True).write(
                     vals
                 )
+
+    def test_company_selection_is_frozen_and_cannot_exceed_identity(self):
+        company = self.env["res.company"].create({"name": "Other execution company"})
+        run = self.Run.create(
+            {"agent_id": self.agent.id, "company_ids": [(4, company.id)]}
+        )
+        with self.assertRaises(AccessError):
+            run.action_start()
+        self.agent_user.company_ids += company
+        run.action_start()
+        self.assertEqual(run.execution_context["allowed_company_ids"], company.ids)
+        with self.assertRaises(AccessError):
+            run.company_ids = self.agent_user.company_id
+
+    def test_company_access_removal_invalidates_pending_call(self):
+        company = self.env["res.company"].create({"name": "Revoked company"})
+        self.agent_user.company_ids += company
+        run = self.Run.create(
+            {
+                "agent_id": self.agent.id,
+                "company_ids": [(4, company.id)],
+                "plan": (
+                    '[{"tool": "create_partner", "args": '
+                    '{"vals_list": [{"name": "Company revoked"}]}}]'
+                ),
+            }
+        )
+        run.action_start()
+        run._advance()
+        run.action_approve()
+        self.agent_user.company_ids -= company
+        run._advance()
+        self.assertEqual(run.call_ids.state, "refused")

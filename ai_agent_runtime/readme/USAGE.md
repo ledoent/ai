@@ -1,4 +1,5 @@
-Define a tool, grant it to an agent, then run a plan.
+An administrator defines tools and assigns them to an agent with a dedicated
+execution user. Never use the superuser. New grants start at **observe**.
 
 ```python
 tool = env["ai.agent.tool"].create({
@@ -9,45 +10,75 @@ tool = env["ai.agent.tool"].create({
 })
 agent = env["ai.agent"].create({
     "name": "Reporter",
-    "user_id": env.ref("base.user_demo").id,   # never the superuser
+    "user_id": execution_user.id,
     "tool_ids": [(6, 0, tool.ids)],
+    "reviewer_ids": [(6, 0, reviewer.ids)],
 })
 run = env["ai.agent.run"].create({
     "agent_id": agent.id,
-    "plan": '[{"tool": "count_partners", "args": {}}]',
+    "plan": '[{"tool": "count_partners", "args": {"domain": []}}]',
 })
 run.action_start()
 run.action_run_to_completion()
-run.step_ids.mapped("result")
 ```
 
-A tool can only be created for a method `/json/2` would actually dispatch to —
-the same predicate `ai_agent_surface` uses — so `sudo`, `with_user`, private
-methods, classmethods and fields are all rejected when you save the tool, not
-when it runs.
+Choose execution companies on the draft run, or leave them empty to use the
+execution user's default company. Starting freezes the agent, plan or goal,
+execution identity and company context. Calls always execute as that identity.
+The tool must be remotely callable and remain on the current administrator
+allowlist. Removing a tool revokes its capability without deleting history.
 
-## Approval
+## Review and authority
 
-Set `requires_approval` on a tool and the run stops at `awaiting_approval`
-*before* calling it, recording the pending tool and arguments. `action_approve()`
-authorises **that one step**; the next gated step stops again.
-`action_reject()` cancels the run having changed nothing.
+Reviewers need the **AI reviewer** group and assignment on the agent. Accounts
+configured as any agent's execution identity cannot review or configure
+permissions, even when assigned. Administrators, execution users and assigned
+reviewers can access the run's invocation and audit records.
 
-## Background execution
+- **Observe:** read tools execute. Writers only record intent. Accepting an
+  observed intent records agreement and never executes the target.
+- **Propose:** writers wait for approval of their exact stored invocation.
+- **Apply:** calls execute, still honoring a tool's explicit `requires_approval`.
 
-`ai.agent.run._cron_drain()` advances every running run and commits as it goes,
-using `_commit_progress` so a long queue is spread across several cron
-acquisitions instead of monopolising a worker. The cron record ships
-**inactive** — background execution should be a deliberate act, and an always-on
-drain in a review database would execute plans nobody asked for.
+Explicit approval also applies to read tools at every level. Approvals bind the
+snapshot, including arguments, identity and policy. A stale grant, identity,
+target or policy produces a refusal; edit a new draft rather than the old run.
+Public ORM calls cannot set approval metadata or alter snapshots and evidence.
 
-Note that this does not make runs *concurrent*. One cron definition is one
-execution at a time, because `_acquire_one_job` locks a single `ir_cron` row
-with `FOR NO KEY UPDATE SKIP LOCKED`. Quantifying that, and whether a partial
-drain changes it, is a separate experiment.
+The **Agent invocations** menu exposes review and undo actions. Open a capability
+from the agent form to veto it or, as an administrator, set a manual level or
+clear a promotion lock. These transitions require a reason. Veto forces observe
+and locks automatic promotion until an administrator clears it.
 
-## What is deliberately not here
+## Automatic promotion and undo
 
-No language model, no planner, no chat surface, no tool-call parsing. Those are
-the parts most likely to be redesigned, and none of them can be evaluated
-honestly until the gates above are known to hold.
+The daily evaluation cron uses the configured defaults of **20 samples, 90%
+approval and three consecutive rejections**, with the irreversible guard on.
+Accepted observations count positively. Approved calls count positively only
+after successful execution. Technical failures and unreviewed successes give no
+positive credit. Each call has at most one judgment and one undo signal.
+
+Each authority transition starts a fresh evidence epoch. The same samples
+cannot buy both promotions. Three consecutive qualifying rejections demote
+immediately. A requested undo removes apply authority before attempting reversal;
+failure leaves the action applied, with an error for manual repair.
+
+Writing tools require trusted addon code implementing the exact target's
+`ReversalAdapter` contract before automatic promotion to apply. No administrator
+Boolean substitutes for an adapter. Initial adapters are database-local and
+must detect intervening changes; the addon ships only a test vertical. Banking
+proposal feedback is not attributed to runtime capabilities and gives no credit.
+
+## Background execution and upgrade
+
+The execution drain cron ships **inactive**. Enable it deliberately to advance
+running runs. Promotion evaluation is daily and server-owned. PostgreSQL locks
+and uniqueness serialize dispatch and judgment; callers encountering a
+serialization conflict must retry the transaction, as Odoo RPC does.
+
+Upgrade initializes existing grants at observe and cancels running or pending
+legacy runs because their inputs lack trustworthy snapshots. Drafts and completed
+history survive; old audit steps are designated legacy and earn no evidence.
+External side effects carry no exactly-once guarantee. See
+[the capability contract](../docs/capability-ladder.md)
+for adapter and evidence details.

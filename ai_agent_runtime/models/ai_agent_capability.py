@@ -245,3 +245,18 @@ class AiAgentCapability(models.Model):
             cap._lock_authority()
             cap._change(reason, promotion_locked=False)
         return True
+
+    def action_open_manual(self):
+        self.ensure_one()
+        self.env["ai.agent"]._check_admin()
+        return self.env["ai.agent.authority.wizard"]._open("manual", capability=self)
+
+    def action_open_veto(self):
+        self.ensure_one()
+        self.agent_id._check_reviewer()
+        return self.env["ai.agent.authority.wizard"]._open("veto", capability=self)
+
+    def action_open_unlock(self):
+        self.ensure_one()
+        self.env["ai.agent"]._check_admin()
+        return self.env["ai.agent.authority.wizard"]._open("unlock", capability=self)

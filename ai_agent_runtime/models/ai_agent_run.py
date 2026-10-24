@@ -34,6 +34,11 @@ class AiAgentRun(models.Model):
         readonly=True,
     )
     plan = fields.Text(required=True, default="[]")
+    company_ids = fields.Many2many(
+        "res.company",
+        string="Execution companies",
+        help="Empty uses the execution user's default company. Frozen at start.",
+    )
     step_no = fields.Integer(default=0, readonly=True)
     step_ids = fields.One2many("ai.agent.run.step", "run_id", readonly=True)
     call_ids = fields.One2many("ai.agent.call", "run_id", readonly=True)
@@ -95,6 +100,8 @@ class AiAgentRun(models.Model):
         return super(AiAgentRun, self.sudo()).write(vals)
 
     def _lock(self):
+        if not self:
+            return
         self.check_access("write")
         self.flush_recordset()
         self.env.cr.execute(
@@ -263,11 +270,16 @@ class AiAgentRun(models.Model):
 
     def _start_values(self):
         user = self.agent_id.user_id
+        companies = self.company_ids or user.company_id
+        if not set(companies.ids).issubset(user.company_ids.ids):
+            raise AccessError(
+                self.env._("Execution companies exceed the agent user's access.")
+            )
         return {
             "state": "running",
             "execution_user_id": user.id,
             "execution_context": {
-                "allowed_company_ids": user.company_ids.ids,
+                "allowed_company_ids": companies.ids,
                 "lang": user.lang,
                 "tz": user.tz,
             },

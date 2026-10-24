@@ -41,7 +41,23 @@
                         <field name="user_id" />
                         <field name="active" />
                     </group>
+                    <field name="reviewer_ids" widget="many2many_tags" />
+                    <group string="Earned authority" groups="base.group_system">
+                        <field name="promotion_samples" />
+                        <field name="promotion_rate" />
+                        <field name="rejection_limit" />
+                        <field name="irreversible_guard" />
+                    </group>
                     <field name="tool_ids" widget="many2many" />
+                    <field name="capability_ids" readonly="1">
+                        <list create="0" delete="0">
+                            <field name="tool_id" />
+                            <field name="granted" />
+                            <field name="level" />
+                            <field name="epoch" />
+                            <field name="promotion_locked" />
+                        </list>
+                    </field>
                 </sheet>
             </form>
         </field>

@@ -506,3 +506,105 @@ class TestArgsSnapshot(AgentRuntimeCommon):
         # The recorded args are byte-identical to what the human approved.
         self.assertEqual(run.step_ids.args, pending)
         self.assertNotIn("properties_base_definition_id", run.step_ids.args)
+
+
+@tagged("post_install", "-at_install")
+class TestCapabilityLoop(AgentRuntimeCommon):
+    """Exercise the same authority boundary from scripted model decisions."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.agent.provider_id = cls.env["ai.agent.provider"].create(
+            {"name": "Stub", "kind": "stub"}
+        )
+
+    def goal_run(self, goal, script):
+        run = self.Run.create({"agent_id": self.agent.id, "goal": goal})
+        run.action_start()
+        return run.with_context(stub_script=script)
+
+    def pending_writer(self):
+        run = self.goal_run(
+            "Create a contact",
+            [
+                {
+                    "kind": "tool",
+                    "tool": "create_partner",
+                    "args": {"vals_list": [{"name": "LLM authority fixture"}]},
+                }
+            ],
+        )
+        run._advance()
+        return run
+
+    def test_observe_writer_and_acceptance_never_execute(self):
+        self.agent._capability(self.tool_create).action_set_level(
+            "observe", "LLM observe"
+        )
+        run = self.pending_writer()
+        self.assertEqual(run.call_ids.state, "observed")
+        run.call_ids.action_accept()
+        self.assertFalse(
+            self.env["res.partner"].search([("name", "=", "LLM authority fixture")])
+        )
+        self.assertEqual(run.call_ids.evidence_ids.verdict, "accept")
+
+    def test_revocation_invalidates_llm_pending_snapshot(self):
+        run = self.pending_writer()
+        run.action_approve()
+        self.agent.tool_ids -= self.tool_create
+        run._advance()
+        self.assertEqual(run.state, "failed")
+        self.assertEqual(run.call_ids.state, "refused")
+
+    def test_identity_change_invalidates_llm_pending_snapshot(self):
+        run = self.pending_writer()
+        run.action_approve()
+        self.agent.user_id = self.env.ref("base.user_admin")
+        run._advance()
+        self.assertEqual(run.call_ids.state, "refused")
+
+    def test_retargeting_invalidates_llm_pending_snapshot(self):
+        run = self.pending_writer()
+        run.action_approve()
+        self.tool_create.method_name = "name_search"
+        run._advance()
+        self.assertEqual(run.call_ids.state, "refused")
+
+    def test_policy_change_invalidates_llm_pending_snapshot(self):
+        run = self.pending_writer()
+        run.action_approve()
+        self.agent.promotion_rate = 95
+        run._advance()
+        self.assertEqual(run.call_ids.state, "refused")
+
+    def test_started_goal_provider_and_budget_are_frozen(self):
+        from odoo.exceptions import AccessError
+
+        run = self.pending_writer()
+        for vals in ({"goal": "Changed"}, {"answer": "Forged"}, {"step_budget": 999}):
+            with self.assertRaises(AccessError):
+                run.write(vals)
+        self.agent.max_steps = 999
+        self.assertEqual(run.step_budget, 12)
+        self.agent.provider_id = False
+        run.action_approve()
+        run.with_context(stub_script=[]).action_run_to_completion()
+        self.assertEqual(run.state, "done")
+        self.assertEqual(run.call_ids.state, "dispatched")
+
+    def test_readonly_explicit_approval_in_llm_path(self):
+        self.tool_count.requires_approval = True
+        run = self.goal_run(
+            "Count",
+            [
+                {"kind": "tool", "tool": "count_partners", "args": {"domain": []}},
+                {"kind": "final", "answer": "Counted"},
+            ],
+        )
+        run._advance()
+        self.assertEqual(run.state, "awaiting_approval")
+        run.action_approve()
+        run.action_run_to_completion()
+        self.assertEqual(run.answer, "Counted")

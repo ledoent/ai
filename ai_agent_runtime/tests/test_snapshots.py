@@ -56,3 +56,29 @@ class TestSnapshots(AgentRuntimeCommon):
         self.tool_create.requires_approval = False
         run._advance()
         self.assertEqual(run.call_ids.state, "refused")
+
+    def test_forged_default_context_cannot_create_running_run(self):
+        with self.assertRaises(AccessError):
+            self.Run.with_context(default_state="running").create(
+                {"agent_id": self.agent.id}
+            )
+
+    def test_default_context_does_not_forge_invocation_or_evidence(self):
+        run = self.make_run(("create_partner", {"vals_list": [{"name": "Defaults"}]}))
+        run = run.with_context(
+            default_approver_id=self.agent_user.id, default_receipt={"fake": True}
+        )
+        run._advance()
+        self.assertEqual(run.state, "awaiting_approval")
+        self.assertFalse(run.call_ids.approver_id)
+        self.assertFalse(run.call_ids.receipt)
+        run.with_context(default_judged_at="2000-01-01").action_approve()
+        self.assertGreater(run.call_ids.evidence_ids.judged_at.year, 2000)
+
+    def test_static_tool_retargeting_invalidates_pending_snapshot(self):
+        run = self.make_run(("create_partner", {"vals_list": [{"name": "Retargeted"}]}))
+        run._advance()
+        run.action_approve()
+        self.tool_create.method_name = "name_search"
+        run._advance()
+        self.assertEqual(run.call_ids.state, "refused")

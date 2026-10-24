@@ -21,6 +21,22 @@ class AgentRuntimeCommon(TransactionCase):
     """
 
     @classmethod
+    def _fixture_tool(cls, values):
+        # Upgrade fixtures may already own these globally unique targets. All
+        # edits happen inside TransactionCase and are rolled back afterwards.
+        tool = cls.Tool.search(
+            [
+                ("model_name", "=", values["model_name"]),
+                ("method_name", "=", values["method_name"]),
+            ],
+            limit=1,
+        )
+        if tool:
+            tool.write(values)
+            return tool
+        return cls.Tool.create(values)
+
+    @classmethod
     def setUpClass(cls):
         super().setUpClass()
         cls.env.ref("ai_agent_runtime.group_ai_reviewer").user_ids += cls.env.user
@@ -32,7 +48,7 @@ class AgentRuntimeCommon(TransactionCase):
         cls.Tool = cls.env["ai.agent.tool"]
         cls.Run = cls.env["ai.agent.run"]
 
-        cls.tool_count = cls.Tool.create(
+        cls.tool_count = cls._fixture_tool(
             {
                 "name": "count_partners",
                 "description": "How many contacts exist.",
@@ -40,7 +56,7 @@ class AgentRuntimeCommon(TransactionCase):
                 "method_name": "search_count",
             }
         )
-        cls.tool_create = cls.Tool.create(
+        cls.tool_create = cls._fixture_tool(
             {
                 "name": "create_partner",
                 "description": "Create a contact.",
@@ -50,7 +66,7 @@ class AgentRuntimeCommon(TransactionCase):
             }
         )
         # Defined but NOT granted to the agent below -- the allowlist fixture.
-        cls.tool_ungranted = cls.Tool.create(
+        cls.tool_ungranted = cls._fixture_tool(
             {
                 "name": "count_users",
                 "description": "How many users exist.",
@@ -59,7 +75,7 @@ class AgentRuntimeCommon(TransactionCase):
             }
         )
         # Targets a model the agent's user cannot read at all.
-        cls.tool_forbidden = cls.Tool.create(
+        cls.tool_forbidden = cls._fixture_tool(
             {
                 "name": "count_mail_servers",
                 "description": "How many outgoing mail servers exist.",

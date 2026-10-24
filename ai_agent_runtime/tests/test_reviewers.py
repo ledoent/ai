@@ -97,3 +97,40 @@ class TestReviewers(AgentRuntimeCommon):
             self.assertEqual(
                 record.with_user(self.agent_user).read(["id"])[0]["id"], record.id
             )
+
+    def test_database_constraint_prevents_duplicate_judgment(self):
+        from psycopg2.errors import UniqueViolation
+
+        from odoo.tools import mute_logger
+
+        call = self.observed()
+        call.action_accept()
+        with (
+            self.assertRaises(UniqueViolation),
+            mute_logger("odoo.sql_db"),
+            self.cr.savepoint(),
+        ):
+            self.env["ai.agent.evidence"]._record(
+                call, "judgment", "accept", "Duplicate"
+            )
+
+    def test_reason_wizard_cannot_bypass_reviewer_or_admin_authority(self):
+        cap = self.agent._capability(self.tool_create)
+        wizard = (
+            self.env["ai.agent.authority.wizard"]
+            .with_user(self.reviewer)
+            .create(
+                {
+                    "capability_id": cap.id,
+                    "operation": "manual",
+                    "level": "apply",
+                    "reason": "Forged",
+                }
+            )
+        )
+        with self.assertRaises(AccessError):
+            wizard.action_confirm()
+        wizard.operation = "veto"
+        wizard.action_confirm()
+        self.assertEqual(cap.level, "observe")
+        self.assertTrue(cap.promotion_locked)

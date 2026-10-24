@@ -18,6 +18,7 @@
         "security/scope.xml",
         "views/ai_agent_views.xml",
         "views/ai_agent_run_views.xml",
+        "views/ai_agent_authority_views.xml",
         "data/ir_cron.xml",
     ],
     "demo": [],
