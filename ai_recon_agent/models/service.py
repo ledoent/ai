@@ -125,8 +125,10 @@ class AiReconMatchService(models.AbstractModel):
             )
             if violations:
                 raise UserError(
-                    self.env._("Reconciliation is blocked by accounting lock dates: %s")
-                    % self.env["res.company"]._format_lock_dates(violations)
+                    self.env._(
+                        "Reconciliation is blocked by accounting lock dates: %s",
+                        self.env["res.company"]._format_lock_dates(violations),
+                    )
                 )
 
     @api.model
@@ -211,14 +213,8 @@ class AiReconMatchService(models.AbstractModel):
 
     @api.model
     def _positive_id(self, value, label):
-        if (
-            not isinstance(value, int)
-            or isinstance(value, bool)
-            or value < 1
-        ):
-            raise UserError(
-                self.env._("%s must be a positive integer.") % label
-            )
+        if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+            raise UserError(self.env._("%s must be a positive integer.", label))
 
     @api.readonly
     @api.model
@@ -422,7 +418,7 @@ class AiReconMatchService(models.AbstractModel):
                     line_id = item["line_id"]
                     raw_value = item["amount"]
                     if isinstance(raw_value, bool):
-                        raise ValueError("boolean amount")
+                        raise TypeError("boolean amount")
                     value = float(raw_value)
                     if (
                         not isinstance(line_id, int)
@@ -684,8 +680,9 @@ class AiReconMatchService(models.AbstractModel):
             )
         for allocation in match.allocation_ids:
             line_partials = created_partials.filtered(
-                lambda partial: allocation.move_line_id
-                in (partial.debit_move_id | partial.credit_move_id)
+                lambda partial, move_line_id=allocation.move_line_id: (
+                    move_line_id in (partial.debit_move_id | partial.credit_move_id)
+                )
             )
             actual = sum(line_partials.mapped("amount"))
             if float_compare(
@@ -694,7 +691,9 @@ class AiReconMatchService(models.AbstractModel):
                 precision_rounding=line.currency_id.rounding,
             ):
                 raise UserError(
-                    self.env._("Native reconciliation did not apply the exact allocation.")
+                    self.env._(
+                        "Native reconciliation did not apply the exact allocation."
+                    )
                 )
         originating_call = binding[0]
         match._set(

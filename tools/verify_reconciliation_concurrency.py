@@ -1,4 +1,4 @@
-# pylint: disable=print-used
+# pylint: disable=print-used,invalid-commit
 """Race two real PostgreSQL dispatches for the same reconciliation proposal.
 
 Run only against a disposable database with `odoo shell`. Fixture creation is

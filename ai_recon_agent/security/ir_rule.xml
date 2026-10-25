@@ -1,20 +1,27 @@
+<?xml version="1.0" encoding="UTF-8" ?>
 <odoo>
     <record id="rule_ai_recon_assessment_company" model="ir.access">
         <field name="name">Reconciliation assessment scope</field>
-        <field name="model_id" ref="model_ai_recon_assessment"/>
+        <field name="model_id" ref="model_ai_recon_assessment" />
         <field name="operation">r</field>
-        <field name="domain">[] if user.has_group('base.group_system') else ['|', ('call_id.agent_id.user_id', '=', user.id), ('call_id.agent_id.reviewer_ids', 'in', [user.id])]</field>
+        <field
+            name="domain"
+        >[] if user.has_group('base.group_system') else ['|', ('call_id.agent_id.user_id', '=', user.id), ('call_id.agent_id.reviewer_ids', 'in', [user.id])]</field>
     </record>
     <record id="rule_ai_recon_match_company" model="ir.access">
         <field name="name">Reconciliation match scope</field>
-        <field name="model_id" ref="model_ai_recon_match"/>
+        <field name="model_id" ref="model_ai_recon_match" />
         <field name="operation">r</field>
-        <field name="domain">[] if user.has_group('base.group_system') else ['|', ('agent_id.user_id', '=', user.id), ('agent_id.reviewer_ids', 'in', [user.id])]</field>
+        <field
+            name="domain"
+        >[] if user.has_group('base.group_system') else ['|', ('agent_id.user_id', '=', user.id), ('agent_id.reviewer_ids', 'in', [user.id])]</field>
     </record>
     <record id="rule_ai_recon_allocation_company" model="ir.access">
         <field name="name">Reconciliation allocation scope</field>
-        <field name="model_id" ref="model_ai_recon_match_allocation"/>
+        <field name="model_id" ref="model_ai_recon_match_allocation" />
         <field name="operation">r</field>
-        <field name="domain">[] if user.has_group('base.group_system') else ['|', ('match_id.agent_id.user_id', '=', user.id), ('match_id.agent_id.reviewer_ids', 'in', [user.id])]</field>
+        <field
+            name="domain"
+        >[] if user.has_group('base.group_system') else ['|', ('match_id.agent_id.user_id', '=', user.id), ('match_id.agent_id.reviewer_ids', 'in', [user.id])]</field>
     </record>
 </odoo>

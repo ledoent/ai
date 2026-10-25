@@ -1,18 +1,35 @@
+<?xml version="1.0" encoding="UTF-8" ?>
 <odoo>
     <record id="res_company_form_ai_recon_agent" model="ir.ui.view">
         <field name="name">res.company.form.ai.recon.agent</field>
         <field name="model">res.company</field>
-        <field name="inherit_id" ref="base.view_company_form"/>
+        <field name="inherit_id" ref="base.view_company_form" />
         <field name="arch" type="xml">
             <xpath expr="//notebook" position="inside">
                 <page string="AI Reconciliation" groups="base.group_system">
                     <group>
-                        <field name="ai_recon_agent_enabled"/>
-                        <field name="ai_recon_agent_provider_id" invisible="not ai_recon_agent_enabled"/>
-                        <field name="ai_recon_agent_disclosure_version" invisible="not ai_recon_agent_enabled"/>
-                        <field name="ai_recon_agent_max_candidates" invisible="not ai_recon_agent_enabled"/>
-                        <field name="ai_recon_agent_max_allocations" invisible="not ai_recon_agent_enabled"/>
-                        <field name="ai_recon_reviewer_ids" widget="many2many_tags" invisible="not ai_recon_agent_enabled"/>
+                        <field name="ai_recon_agent_enabled" />
+                        <field
+                            name="ai_recon_agent_provider_id"
+                            invisible="not ai_recon_agent_enabled"
+                        />
+                        <field
+                            name="ai_recon_agent_disclosure_version"
+                            invisible="not ai_recon_agent_enabled"
+                        />
+                        <field
+                            name="ai_recon_agent_max_candidates"
+                            invisible="not ai_recon_agent_enabled"
+                        />
+                        <field
+                            name="ai_recon_agent_max_allocations"
+                            invisible="not ai_recon_agent_enabled"
+                        />
+                        <field
+                            name="ai_recon_reviewer_ids"
+                            widget="many2many_tags"
+                            invisible="not ai_recon_agent_enabled"
+                        />
                     </group>
                 </page>
             </xpath>
@@ -23,13 +40,13 @@
         <field name="model">ai.recon.match</field>
         <field name="arch" type="xml">
             <list create="0" edit="0" delete="0">
-                <field name="statement_line_id"/>
-                <field name="company_id"/>
-                <field name="provenance"/>
-                <field name="requires_posting"/>
-                <field name="state"/>
-                <field name="agent_id"/>
-                <field name="reviewer_id"/>
+                <field name="statement_line_id" />
+                <field name="company_id" />
+                <field name="provenance" />
+                <field name="requires_posting" />
+                <field name="state" />
+                <field name="agent_id" />
+                <field name="reviewer_id" />
             </list>
         </field>
     </record>
@@ -39,38 +56,56 @@
         <field name="arch" type="xml">
             <form create="0" edit="0" delete="0">
                 <header>
-                    <button name="action_approve" type="object" string="Accept Match" invisible="state != 'proposed'" groups="ai_agent_runtime.group_ai_reviewer"/>
-                    <button name="action_open_reject" type="object" string="Reject" invisible="state != 'proposed'" groups="ai_agent_runtime.group_ai_reviewer"/>
-                    <button name="action_open_withdraw" type="object" string="Withdraw Approved Match" invisible="state != 'approved'" groups="ai_agent_runtime.group_ai_reviewer"/>
-                    <field name="state" widget="statusbar"/>
+                    <button
+                        name="action_approve"
+                        type="object"
+                        string="Accept Match"
+                        invisible="state != 'proposed'"
+                        groups="ai_agent_runtime.group_ai_reviewer"
+                    />
+                    <button
+                        name="action_open_reject"
+                        type="object"
+                        string="Reject"
+                        invisible="state != 'proposed'"
+                        groups="ai_agent_runtime.group_ai_reviewer"
+                    />
+                    <button
+                        name="action_open_withdraw"
+                        type="object"
+                        string="Withdraw Approved Match"
+                        invisible="state != 'approved'"
+                        groups="ai_agent_runtime.group_ai_reviewer"
+                    />
+                    <field name="state" widget="statusbar" />
                 </header>
                 <sheet>
                     <group>
-                        <field name="company_id"/>
-                        <field name="statement_line_id"/>
-                        <field name="agent_id"/>
-                        <field name="assessment_call_id"/>
-                        <field name="posting_call_id"/>
-                        <field name="reversal_call_id"/>
-                        <field name="provenance"/>
-                        <field name="requires_posting"/>
-                        <field name="payload_hash"/>
+                        <field name="company_id" />
+                        <field name="statement_line_id" />
+                        <field name="agent_id" />
+                        <field name="assessment_call_id" />
+                        <field name="posting_call_id" />
+                        <field name="reversal_call_id" />
+                        <field name="provenance" />
+                        <field name="requires_posting" />
+                        <field name="payload_hash" />
                     </group>
                     <field name="allocation_ids">
                         <list create="0" edit="0" delete="0">
-                            <field name="sequence"/>
-                            <field name="move_line_id"/>
-                            <field name="amount"/>
-                            <field name="currency_id"/>
+                            <field name="sequence" />
+                            <field name="move_line_id" />
+                            <field name="amount" />
+                            <field name="currency_id" />
                         </list>
                     </field>
                     <group>
-                        <field name="reviewer_id"/>
-                        <field name="review_reason"/>
-                        <field name="resolution_reviewer_id"/>
-                        <field name="resolution_reason"/>
-                        <field name="resolved_at"/>
-                        <field name="error"/>
+                        <field name="reviewer_id" />
+                        <field name="review_reason" />
+                        <field name="resolution_reviewer_id" />
+                        <field name="resolution_reason" />
+                        <field name="resolved_at" />
+                        <field name="error" />
                     </group>
                 </sheet>
             </form>
@@ -82,12 +117,21 @@
         <field name="arch" type="xml">
             <form string="Reject reconciliation match">
                 <group>
-                    <field name="match_id"/>
-                    <field name="reason" placeholder="Explain why this allocation is incorrect." required="1"/>
+                    <field name="match_id" />
+                    <field
+                        name="reason"
+                        placeholder="Explain why this allocation is incorrect."
+                        required="1"
+                    />
                 </group>
                 <footer>
-                    <button name="action_reject" type="object" string="Reject Match" class="btn-primary"/>
-                    <button string="Cancel" special="cancel"/>
+                    <button
+                        name="action_reject"
+                        type="object"
+                        string="Reject Match"
+                        class="btn-primary"
+                    />
+                    <button string="Cancel" special="cancel" />
                 </footer>
             </form>
         </field>
@@ -98,12 +142,21 @@
         <field name="arch" type="xml">
             <form string="Withdraw approved reconciliation match">
                 <group>
-                    <field name="match_id"/>
-                    <field name="reason" placeholder="Explain why the approved match is stale." required="1"/>
+                    <field name="match_id" />
+                    <field
+                        name="reason"
+                        placeholder="Explain why the approved match is stale."
+                        required="1"
+                    />
                 </group>
                 <footer>
-                    <button name="action_withdraw" type="object" string="Withdraw Match" class="btn-primary"/>
-                    <button string="Cancel" special="cancel"/>
+                    <button
+                        name="action_withdraw"
+                        type="object"
+                        string="Withdraw Match"
+                        class="btn-primary"
+                    />
+                    <button string="Cancel" special="cancel" />
                 </footer>
             </form>
         </field>
@@ -113,5 +166,12 @@
         <field name="res_model">ai.recon.match</field>
         <field name="view_mode">list,form</field>
     </record>
-    <menuitem id="menu_ai_recon_match" name="Attributed Matches" parent="ai_agent_runtime.menu_ai_agent_root" action="action_ai_recon_match" groups="account.group_account_invoice" sequence="50"/>
+    <menuitem
+        id="menu_ai_recon_match"
+        name="Attributed Matches"
+        parent="ai_agent_runtime.menu_ai_agent_root"
+        action="action_ai_recon_match"
+        groups="account.group_account_invoice"
+        sequence="50"
+    />
 </odoo>

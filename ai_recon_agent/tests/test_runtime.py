@@ -222,9 +222,7 @@ class TestReconciliationRuntime(AccountTestInvoicingCommon):
         packet = ast.literal_eval(run.call_ids.result)
         self.assertEqual(packet["status"], "candidates")
         self.assertTrue(packet["candidate_set_complete"])
-        self.assertEqual(
-            [item["id"] for item in packet["candidates"]], receivable.ids
-        )
+        self.assertEqual([item["id"] for item in packet["candidates"]], receivable.ids)
         self.assertFalse(
             set(unrelated_lines.ids) & {item["id"] for item in packet["candidates"]}
         )
@@ -316,7 +314,9 @@ class TestReconciliationRuntime(AccountTestInvoicingCommon):
         post_run._advance()
 
         bill.invalidate_recordset()
-        self.assertEqual(post_run.call_ids.state, "dispatched", post_run.call_ids.result)
+        self.assertEqual(
+            post_run.call_ids.state, "dispatched", post_run.call_ids.result
+        )
         self.assertTrue(statement_line.is_reconciled)
         self.assertEqual(bill.payment_state, "paid")
 
@@ -338,7 +338,9 @@ class TestReconciliationRuntime(AccountTestInvoicingCommon):
 
         match.with_user(self.reviewer).action_reject("The invoice does not match.")
 
-        evidence = run.call_ids.evidence_ids.filtered(lambda row: row.kind == "business")
+        evidence = run.call_ids.evidence_ids.filtered(
+            lambda row: row.kind == "business"
+        )
         self.assertEqual(match.state, "rejected")
         self.assertEqual(len(evidence), 1)
         self.assertEqual(evidence.verdict, "reject")
@@ -890,7 +892,7 @@ class TestReconciliationRuntime(AccountTestInvoicingCommon):
         self.assertEqual(invoice.payment_state, "not_paid")
 
     def test_llm_path_refuses_a_provider_not_selected_by_the_company(self):
-        _invoice, receivable, statement_line = self.make_invoice_and_statement_line(
+        _invoice, _receivable, statement_line = self.make_invoice_and_statement_line(
             "provider-mismatch"
         )
         provider = self.env["ai.agent.provider"].create(
