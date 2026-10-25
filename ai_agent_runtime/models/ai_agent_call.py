@@ -5,6 +5,8 @@ import json
 from odoo import api, fields, models
 from odoo.exceptions import AccessError, UserError
 
+from ..adapters import invocation_scope
+
 
 class AiAgentCall(models.Model):
     """Immutable invocation inputs; lifecycle changes belong to the dispatcher."""
@@ -200,7 +202,8 @@ class AiAgentCall(models.Model):
                                 "No matching reversal receipt; manual repair required."
                             )
                         )
-                    adapter.reverse(call._execution_record(), call.receipt)
+                    with invocation_scope(call):
+                        adapter.reverse(call._execution_record(), call.receipt)
             except Exception as exc:  # noqa: BLE001 - preserve demotion and applied state
                 call._set({"undo_state": "failed", "undo_error": str(exc)[:2000]})
             else:

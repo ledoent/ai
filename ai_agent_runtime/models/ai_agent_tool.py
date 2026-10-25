@@ -99,15 +99,16 @@ class AiAgentTool(models.Model):
     def _policy_signature(self):
         self.ensure_one()
         adapter = self._undo_adapter()
-        return json.dumps(
-            [
-                self.model_name,
-                self.method_name,
-                self.classification,
-                self.requires_approval,
-                adapter.contract_id if adapter else None,
-            ]
-        )
+        signature = [
+            self.model_name,
+            self.method_name,
+            self.classification,
+            self.requires_approval,
+            adapter.contract_id if adapter else None,
+        ]
+        if adapter and adapter.business_evidence_required:
+            signature.append("business-evidence-required")
+        return json.dumps(signature)
 
     @api.model_create_multi
     def create(self, vals_list):

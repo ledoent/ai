@@ -4,8 +4,12 @@ import inspect
 import json
 import logging
 
+from psycopg2 import errors as pg_errors
+
 from odoo import api, fields, models
 from odoo.exceptions import AccessError, UserError
+
+from ..adapters import invocation_scope
 
 _logger = logging.getLogger(__name__)
 
@@ -230,7 +234,7 @@ class AiAgentRun(models.Model):
             self._set({"state": "awaiting_approval", "pending_call_id": call.id})
             return False
         try:
-            with self.env.cr.savepoint():
+            with self.env.cr.savepoint(), invocation_scope(call):
                 adapter = tool._undo_adapter()
                 prepared = (
                     adapter.prepare(call._execution_record(), call._arguments())
@@ -244,6 +248,10 @@ class AiAgentRun(models.Model):
                     )
                     call._set({"receipt": json.loads(json.dumps(receipt))})
                 rendered = self._annotate_result(tool, call._arguments(), result)[:2000]
+        except (pg_errors.SerializationFailure, pg_errors.DeadlockDetected):
+            # Let Odoo retry the transaction. Recording this as a tool failure
+            # would commit an outcome from a transaction whose snapshot lost.
+            raise
         except Exception as exc:  # noqa: BLE001 - recoverable tool errors
             call._set(
                 {"state": "failed", "result": f"{type(exc).__name__}: {exc}"[:2000]}

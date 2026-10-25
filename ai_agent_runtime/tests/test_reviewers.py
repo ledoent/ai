@@ -114,6 +114,27 @@ class TestReviewers(AgentRuntimeCommon):
                 call, "judgment", "accept", "Duplicate"
             )
 
+    def test_business_judgment_overrides_invocation_judgment_and_deduplicates(self):
+        run = self.make_run(("count_partners", {"domain": []}))
+        run._advance()
+        first = run.call_ids
+        Evidence = self.env["ai.agent.evidence"]
+        Evidence._record(first, "judgment", "accept", "Invocation accepted")
+        Evidence.with_user(self.reviewer)._record_business(
+            first, "reject", "The selected document was wrong", "business-intent-1"
+        )
+        self.assertEqual(first.capability_id._statistics()["approvals"], 0)
+        self.assertEqual(first.capability_id._statistics()["rejections"], 1)
+
+        second_run = self.make_run(("count_partners", {"domain": []}))
+        second_run._advance()
+        second = second_run.call_ids
+        duplicate = Evidence.with_user(self.reviewer)._record_business(
+            second, "accept", "Repeated intent", "business-intent-1"
+        )
+        self.assertFalse(duplicate)
+        self.assertEqual(first.capability_id._statistics()["rejections"], 1)
+
     def test_reason_wizard_cannot_bypass_reviewer_or_admin_authority(self):
         cap = self.agent._capability(self.tool_create)
         wizard = (

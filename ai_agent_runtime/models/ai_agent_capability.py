@@ -98,16 +98,34 @@ class AiAgentCapability(models.Model):
                 order="id",
             )
         )
-        judgments = evidence.filtered(
-            lambda e: (
-                e.kind == "judgment"
-                and (
-                    e.verdict == "reject"
-                    or e.call_id.state in ("observed", "dispatched", "undone")
-                )
-            )
+        by_call = {}
+        for item in evidence.filtered(lambda e: e.kind in ("judgment", "business")):
+            previous = by_call.get(item.call_id.id)
+            if previous is None or item.kind == "business":
+                by_call[item.call_id.id] = item
+        for call_id, item in list(by_call.items()):
+            if item.kind == "business":
+                continue
+            adapter = item.call_id.tool_id._undo_adapter()
+            if (
+                adapter
+                and adapter.business_evidence_required
+                and item.call_id.state != "observed"
+            ):
+                # An exact invocation approval authorizes creating the proposal;
+                # it does not establish that the proposed accounting match is
+                # correct. Wait for the addon-bound business judgment.
+                by_call.pop(call_id)
+        judgments = sorted(
+            (
+                item
+                for item in by_call.values()
+                if item.verdict == "reject"
+                or item.call_id.state in ("observed", "dispatched", "undone")
+            ),
+            key=lambda item: (item.judged_at, item.id),
         )
-        approvals = len(judgments.filtered(lambda e: e.verdict == "accept"))
+        approvals = sum(item.verdict == "accept" for item in judgments)
         streak = 0
         for item in reversed(judgments):
             if item.verdict != "reject":
@@ -118,10 +136,10 @@ class AiAgentCapability(models.Model):
             "rejections": len(judgments) - approvals,
             "undos": len(evidence.filtered(lambda e: e.kind == "undo")),
             "negative_streak": streak,
-            "period_start": fields.Datetime.to_string(judgments[:1].judged_at)
+            "period_start": fields.Datetime.to_string(judgments[0].judged_at)
             if judgments
             else False,
-            "period_end": fields.Datetime.to_string(judgments[-1:].judged_at)
+            "period_end": fields.Datetime.to_string(judgments[-1].judged_at)
             if judgments
             else False,
         }
