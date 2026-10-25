@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<odoo>
+    <record id="profile_form" model="ir.ui.view">
+        <field name="model">ai.recon.profile</field>
+        <field name="arch" type="xml">
+            <form>
+                <header>
+                    <button
+                        name="action_provision"
+                        type="object"
+                        string="Provision identity"
+                        groups="base.group_system"
+                    />
+                    <button
+                        name="action_intake"
+                        type="object"
+                        string="Collect matching assessments"
+                        groups="base.group_system"
+                    />
+                </header>
+                <sheet>
+                    <group>
+                        <field name="company_id" />
+                        <field name="journal_ids" widget="many2many_tags" />
+                        <field name="agent_id" />
+                        <field name="enabled" />
+                        <field name="revision" />
+                        <field name="llm_enabled" />
+                        <field name="disclosure_opt_in" />
+                        <field name="provider_id" />
+                        <field name="intake_limit" />
+                        <field name="candidate_limit" />
+                        <field name="allocation_limit" />
+                    </group>
+                    <field name="last_error" />
+                </sheet>
+            </form>
+        </field>
+    </record>
+    <record id="profile_action" model="ir.actions.act_window">
+        <field name="name">Matching profiles</field>
+        <field name="res_model">ai.recon.profile</field>
+        <field name="view_mode">list,form</field>
+    </record>
+    <menuitem
+        id="profile_menu"
+        parent="ai_agent_runtime.menu_ai_agent_root"
+        action="profile_action"
+        sequence="50"
+        groups="base.group_system"
+    />
+</odoo>

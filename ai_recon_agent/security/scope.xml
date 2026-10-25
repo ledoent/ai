@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<odoo>
+    <record id="scope_profile" model="ir.access">
+        <field name="name">Matching profile scope</field>
+        <field name="model_id" ref="model_ai_recon_profile" />
+        <field name="operation">crud</field>
+        <field name="domain">[('company_id', 'in', company_ids)]</field>
+    </record>
+    <record id="scope_tolerance" model="ir.access">
+        <field name="name">Matching tolerance scope</field>
+        <field name="model_id" ref="model_ai_recon_tolerance" />
+        <field name="operation">crud</field>
+        <field name="domain">[('profile_id.company_id', 'in', company_ids)]</field>
+    </record>
+    <record id="scope_assessment" model="ir.access">
+        <field name="name">Matching assessment scope</field>
+        <field name="model_id" ref="model_ai_recon_assessment" />
+        <field name="operation">crud</field>
+        <field
+            name="domain"
+        >[] if user.has_group('base.group_system') else ['&amp;', ('company_id', 'in', company_ids), '|', ('agent_id.user_id', '=', user.id), ('agent_id.reviewer_ids', 'in', [user.id])]</field>
+    </record>
+    <record id="scope_match_proposal" model="ir.access">
+        <field name="name">Matching match_proposal scope</field>
+        <field name="model_id" ref="model_ai_recon_match_proposal" />
+        <field name="operation">crud</field>
+        <field
+            name="domain"
+        >[] if user.has_group('base.group_system') else ['&amp;', ('company_id', 'in', company_ids), '|', ('agent_id.user_id', '=', user.id), ('agent_id.reviewer_ids', 'in', [user.id])]</field>
+    </record>
+    <record id="scope_match_allocation" model="ir.access">
+        <field name="name">Matching match_allocation scope</field>
+        <field name="model_id" ref="model_ai_recon_match_allocation" />
+        <field name="operation">crud</field>
+        <field
+            name="domain"
+        >[] if user.has_group('base.group_system') else ['&amp;', ('company_id', 'in', company_ids), '|', ('agent_id.user_id', '=', user.id), ('agent_id.reviewer_ids', 'in', [user.id])]</field>
+    </record>
+    <record id="scope_match_batch" model="ir.access">
+        <field name="name">Matching match_batch scope</field>
+        <field name="model_id" ref="model_ai_recon_match_batch" />
+        <field name="operation">crud</field>
+        <field
+            name="domain"
+        >[] if user.has_group('base.group_system') else ['&amp;', ('company_id', 'in', company_ids), '|', ('agent_id.user_id', '=', user.id), ('agent_id.reviewer_ids', 'in', [user.id])]</field>
+    </record>
+</odoo>

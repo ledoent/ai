@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<odoo>
+    <record id="tool_match_items" model="ai.agent.tool">
+        <field name="name">match_existing_items</field>
+        <field name="description">Execute a frozen, corroborated bank matching proposal.</field>
+        <field name="model_name">ai.recon.match.service</field>
+        <field name="method_name">match_items</field>
+    </record>
+    <record id="tool_post_match" model="ai.agent.tool">
+        <field name="name">post_reviewed_match</field>
+        <field name="description">Execute an exact reviewed accounting posting proposal.</field>
+        <field name="model_name">ai.recon.match.service</field>
+        <field name="method_name">post_match</field>
+        <field name="requires_approval" eval="True" />
+    </record>
+</odoo>
