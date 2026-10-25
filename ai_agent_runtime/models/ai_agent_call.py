@@ -2,6 +2,8 @@
 # Protected audit records deliberately reject public mutation and deletion.
 import json
 
+from psycopg2.errors import DeadlockDetected, SerializationFailure
+
 from odoo import api, fields, models
 from odoo.exceptions import AccessError, UserError
 
@@ -42,6 +44,10 @@ class AiAgentCall(models.Model):
     )
     approver_id = fields.Many2one("res.users", ondelete="restrict")
     result = fields.Text()
+    force_approval = fields.Boolean(default=False)
+    approval_reason = fields.Text()
+    promotion_key = fields.Char()
+    promotion_eligible = fields.Boolean(default=True)
     receipt = fields.Json()
     undo_state = fields.Selection(
         [(s, s.title()) for s in ("none", "requested", "failed", "done")],
@@ -69,10 +75,26 @@ class AiAgentCall(models.Model):
 
     @api.model
     def _new(self, vals):
-        return super(AiAgentCall, self.sudo().with_context({})).create(vals)
+        call = super(AiAgentCall, self.sudo().with_context({})).create(vals)
+        call._on_created()
+        return call
 
     def _set(self, vals):
-        return super(AiAgentCall, self.sudo()).write(vals)
+        result = super(AiAgentCall, self.sudo()).write(vals)
+        self._on_outcome()
+        return result
+
+    def _on_created(self):
+        """Trusted vertical binding, before any observed or pending outcome."""
+
+    def _on_outcome(self):
+        """Trusted projections; this hook must never execute business work."""
+
+    def _validate_business(self):
+        """Pure preflight; execution adapters repeat it under financial locks."""
+
+    def _validate_undo_request(self, quote_id):
+        """Optional trusted vertical reversal-preview requirement."""
 
     def _validate(self):
         self.ensure_one()
@@ -172,13 +194,14 @@ class AiAgentCall(models.Model):
             .with_user(self.user_id)
         )
 
-    def action_undo(self, reason):
+    def action_undo(self, reason, quote_id=None):
         if not reason or not reason.strip():
             raise UserError(self.env._("An undo reason is required."))
         for call in self:
             call._review_lock()
             if call.state != "dispatched" or call.undo_state != "none":
                 raise UserError(self.env._("Only an applied call can be undone once."))
+            call._validate_undo_request(quote_id)
             self.env["ai.agent.evidence"]._record(call, "undo", "request", reason)
             cap = call.capability_id
             # The downgrade must survive a failed reversal savepoint.
@@ -201,6 +224,8 @@ class AiAgentCall(models.Model):
                             )
                         )
                     adapter.reverse(call._execution_record(), call.receipt)
+            except (SerializationFailure, DeadlockDetected):
+                raise
             except Exception as exc:  # noqa: BLE001 - preserve demotion and applied state
                 call._set({"undo_state": "failed", "undo_error": str(exc)[:2000]})
             else:

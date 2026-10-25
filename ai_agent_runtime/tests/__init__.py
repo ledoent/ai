@@ -6,3 +6,4 @@ from . import test_capabilities
 from . import test_reviewers
 from . import test_promotion
 from . import test_adapters
+from . import test_invocation_scope

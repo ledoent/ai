@@ -4,8 +4,12 @@ import inspect
 import json
 import logging
 
+from psycopg2.errors import DeadlockDetected, SerializationFailure
+
 from odoo import api, fields, models
 from odoo.exceptions import AccessError, UserError
+
+from ..invocation import invocation
 
 _logger = logging.getLogger(__name__)
 
@@ -215,6 +219,7 @@ class AiAgentRun(models.Model):
             )
         try:
             call._validate()
+            call._validate_business()
         except AccessError as exc:
             call._set({"state": "refused", "result": str(exc)})
             return self._finish_call(call)
@@ -223,14 +228,18 @@ class AiAgentRun(models.Model):
                 {"state": "observed", "result": "Intent recorded; target not invoked."}
             )
             return self._finish_call(call, recover=recover)
-        needs_approval = tool.requires_approval or (
-            tool.classification != "readonly" and call.capability_level == "propose"
+        needs_approval = (
+            tool.requires_approval
+            or call.force_approval
+            or (
+                tool.classification != "readonly" and call.capability_level == "propose"
+            )
         )
         if needs_approval and call.state != "approved":
             self._set({"state": "awaiting_approval", "pending_call_id": call.id})
             return False
         try:
-            with self.env.cr.savepoint():
+            with self.env.cr.savepoint(), invocation(call):
                 adapter = tool._undo_adapter()
                 prepared = (
                     adapter.prepare(call._execution_record(), call._arguments())
@@ -244,6 +253,8 @@ class AiAgentRun(models.Model):
                     )
                     call._set({"receipt": json.loads(json.dumps(receipt))})
                 rendered = self._annotate_result(tool, call._arguments(), result)[:2000]
+        except (SerializationFailure, DeadlockDetected):
+            raise
         except Exception as exc:  # noqa: BLE001 - recoverable tool errors
             call._set(
                 {"state": "failed", "result": f"{type(exc).__name__}: {exc}"[:2000]}
@@ -324,6 +335,8 @@ class AiAgentRun(models.Model):
             try:
                 with self.env.cr.savepoint():
                     run.action_run_to_completion()
+            except (SerializationFailure, DeadlockDetected):
+                raise
             except Exception:
                 _logger.exception("ai.agent.run %s drain failed", run.id)
                 run._set({"state": "failed", "error": "Unhandled error; see log."})

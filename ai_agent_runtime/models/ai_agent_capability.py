@@ -98,15 +98,23 @@ class AiAgentCapability(models.Model):
                 order="id",
             )
         )
-        judgments = evidence.filtered(
-            lambda e: (
-                e.kind == "judgment"
-                and (
-                    e.verdict == "reject"
-                    or e.call_id.state in ("observed", "dispatched", "undone")
-                )
-            )
-        )
+        # Keep append-only judgments, but count an economic intent only once.
+        seen = set()
+        judgments = evidence.browse()
+        for item in evidence:
+            call = item.call_id
+            if item.kind != "judgment" or not call.promotion_eligible:
+                continue
+            if item.verdict != "reject" and call.state not in (
+                "observed",
+                "dispatched",
+                "undone",
+            ):
+                continue
+            key = call.promotion_key or f"call:{call.id}"
+            if key not in seen:
+                seen.add(key)
+                judgments |= item
         approvals = len(judgments.filtered(lambda e: e.verdict == "accept"))
         streak = 0
         for item in reversed(judgments):
