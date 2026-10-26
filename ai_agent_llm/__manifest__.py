@@ -1,7 +1,7 @@
 {
     "name": "AI Agent LLM",
     "summary": "Goal-driven tool-calling loop; the runtime still enforces the gates",
-    "version": "20.0.2.0.0",
+    "version": "20.0.3.0.0",
     "license": "AGPL-3",
     "author": "Odoo Community Association (OCA)",
     "maintainers": ["dnplkndll"],
