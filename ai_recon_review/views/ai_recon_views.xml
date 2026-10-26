@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<odoo>
+    <record id="ai_recon_proposal_view_list" model="ir.ui.view">
+        <field name="model">ai.recon.proposal</field>
+        <field name="arch" type="xml">
+            <list
+                decoration-success="state == 'applied'"
+                decoration-muted="state in ('noted', 'rejected')"
+            >
+                <field name="confidence" />
+                <field name="journal_id" />
+                <field name="payment_ref" />
+                <field name="amount" />
+                <field name="partner_id" />
+                <field name="account_id" />
+                <field name="reconcile_model_id" optional="hide" />
+                <field name="state" />
+                <button
+                    name="action_approve"
+                    string="Approve"
+                    type="object"
+                    icon="fa-check"
+                    invisible="state != 'proposed'"
+                />
+                <button
+                    name="action_reject"
+                    string="Reject"
+                    type="object"
+                    icon="fa-times"
+                    invisible="state != 'proposed'"
+                />
+            </list>
+        </field>
+    </record>
+
+    <record id="ai_recon_proposal_view_form" model="ir.ui.view">
+        <field name="model">ai.recon.proposal</field>
+        <field name="arch" type="xml">
+            <form>
+                <header>
+                    <button
+                        name="action_approve"
+                        string="Approve"
+                        type="object"
+                        class="btn-primary"
+                        invisible="state != 'proposed'"
+                    />
+                    <button
+                        name="action_reject"
+                        string="Reject"
+                        type="object"
+                        invisible="state != 'proposed'"
+                    />
+                    <button
+                        name="action_undo"
+                        string="Undo"
+                        type="object"
+                        invisible="state != 'applied'"
+                    />
+                    <field name="state" widget="statusbar" />
+                </header>
+                <sheet>
+                    <group>
+                        <group>
+                            <field name="statement_line_id" />
+                            <field name="journal_id" />
+                            <field name="payment_ref" />
+                            <field name="amount" />
+                        </group>
+                        <group>
+                            <field name="confidence" />
+                            <field name="partner_id" />
+                            <field name="account_id" />
+                            <field name="reconcile_model_id" />
+                            <field name="approved_by" invisible="not approved_by" />
+                            <field name="approved_date" invisible="not approved_date" />
+                        </group>
+                    </group>
+                    <field
+                        name="rationale"
+                        placeholder="Why the agent proposed this..."
+                    />
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="ai_recon_batch_view_form" model="ir.ui.view">
+        <field name="model">ai.recon.batch</field>
+        <field name="arch" type="xml">
+            <form>
+                <header>
+                    <button
+                        name="action_draft_rules"
+                        string="Draft rules from unmatched"
+                        type="object"
+                    />
+                    <button
+                        name="action_send"
+                        string="Send review email"
+                        type="object"
+                        class="btn-primary"
+                    />
+                </header>
+                <sheet>
+                    <group>
+                        <field name="date" />
+                        <field name="items_seen" />
+                        <field name="truncated" />
+                        <field name="count_high" />
+                        <field name="count_medium" />
+                        <field name="count_none" />
+                    </group>
+                    <field name="proposal_ids" />
+                </sheet>
+                <chatter />
+            </form>
+        </field>
+    </record>
+
+    <record id="ai_recon_batch_view_list" model="ir.ui.view">
+        <field name="model">ai.recon.batch</field>
+        <field name="arch" type="xml">
+            <list>
+                <field name="name" />
+                <field name="items_seen" />
+                <field name="count_high" />
+                <field name="count_medium" />
+                <field name="count_none" />
+                <field name="truncated" />
+            </list>
+        </field>
+    </record>
+
+    <record id="ai_recon_batch_action" model="ir.actions.act_window">
+        <field name="name">Reconciliation Reviews</field>
+        <field name="res_model">ai.recon.batch</field>
+    </record>
+
+    <record id="ai_recon_proposal_action" model="ir.actions.act_window">
+        <field name="name">Reconciliation Proposals</field>
+        <field name="res_model">ai.recon.proposal</field>
+    </record>
+
+    <menuitem
+        id="menu_ai_recon_batch"
+        parent="ai_agent_runtime.menu_ai_agent_root"
+        action="ai_recon_batch_action"
+        sequence="40"
+    />
+    <menuitem
+        id="menu_ai_recon_proposal"
+        parent="ai_agent_runtime.menu_ai_agent_root"
+        action="ai_recon_proposal_action"
+        sequence="45"
+    />
+</odoo>

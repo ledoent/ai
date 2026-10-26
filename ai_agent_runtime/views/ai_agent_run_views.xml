@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<odoo>
+    <record id="ai_agent_run_view_form" model="ir.ui.view">
+        <field name="model">ai.agent.run</field>
+        <field name="arch" type="xml">
+            <form>
+                <header>
+                    <button
+                        name="action_start"
+                        string="Start"
+                        type="object"
+                        class="btn-primary"
+                        invisible="state != 'draft'"
+                    />
+                    <button
+                        name="action_approve"
+                        string="Approve step"
+                        type="object"
+                        class="btn-primary"
+                        invisible="state != 'awaiting_approval'"
+                    />
+                    <button
+                        name="action_reject"
+                        string="Reject"
+                        type="object"
+                        invisible="state != 'awaiting_approval'"
+                    />
+                    <field name="state" widget="statusbar" />
+                </header>
+                <sheet>
+                    <group>
+                        <field name="agent_id" readonly="state != 'draft'" />
+                        <field name="step_no" />
+                        <field name="pending_tool_id" invisible="not pending_tool_id" />
+                        <field name="approver_id" invisible="not approver_id" />
+                    </group>
+                    <field
+                        name="company_ids"
+                        widget="many2many_tags"
+                        readonly="state != 'draft'"
+                    />
+                    <field name="plan" readonly="state != 'draft'" />
+                    <field name="call_ids" readonly="1">
+                        <list create="0" delete="0">
+                            <field name="sequence" />
+                            <field name="tool_name" />
+                            <field name="capability_level" />
+                            <field name="state" />
+                            <field name="undo_state" />
+                        </list>
+                    </field>
+                    <field name="error" invisible="not error" />
+                    <field name="step_ids">
+                        <list>
+                            <field name="sequence" />
+                            <field name="tool_id" />
+                            <field name="args" />
+                            <field name="result" />
+                            <field name="failed" />
+                        </list>
+                    </field>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="ai_agent_run_view_list" model="ir.ui.view">
+        <field name="model">ai.agent.run</field>
+        <field name="arch" type="xml">
+            <list>
+                <field name="name" />
+                <field name="agent_id" />
+                <field name="step_no" />
+                <field name="state" />
+            </list>
+        </field>
+    </record>
+
+    <record id="ai_agent_run_action" model="ir.actions.act_window">
+        <field name="name">Agent Runs</field>
+        <field name="res_model">ai.agent.run</field>
+    </record>
+
+    <menuitem
+        id="menu_ai_agent_run"
+        parent="menu_ai_agent_root"
+        action="ai_agent_run_action"
+        sequence="5"
+    />
+</odoo>
