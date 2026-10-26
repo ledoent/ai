@@ -324,20 +324,92 @@ class AiAgentRun(models.Model):
         return True
 
     @api.model
+    def _claim_next(self, exclude):
+        """Claim the oldest running run no other drain lane is holding.
+
+        ``SKIP LOCKED`` is deliberately scoped to this claim and nowhere else.
+        ``_lock`` stays blocking on the approval and write paths, which want
+        *this* record and must wait for whoever holds it; claiming wants the
+        *next available* one and must not queue.
+
+        No lease column is needed. ``state`` is already the durable source of
+        truth and a claim covers exactly one step, so a worker killed mid-step
+        rolls that step back and the run is simply claimable again.
+        """
+        self.env.cr.execute(
+            """
+            SELECT id
+              FROM ai_agent_run
+             WHERE state = 'running'
+               AND id <> ALL(%s)
+             ORDER BY id
+               FOR UPDATE SKIP LOCKED
+             LIMIT 1
+            """,
+            [list(exclude) or [0]],
+        )
+        row = self.env.cr.fetchone()
+        return self.browse(row[0]) if row else None
+
+    @api.model
     def _cron_drain(self):
-        runs = self.search([("state", "=", "running")])
+        """Advance running runs one step at a time, oldest first.
+
+        One step per claim rather than one run to completion. Running a whole
+        plan per claim means a second conversation cannot take a single step
+        until the first has finished: with eight 4-step runs that measured a
+        140.7s wait for the last run's first step, and duplicating the cron row
+        into four lanes changed nothing, because every lane selected the same
+        newest-first list and queued on the same blocking ``FOR UPDATE``.
+        Ordering is ``id`` ascending for the same reason -- the model's
+        ``_order`` is ``id desc``, which serves newest-first and starves the
+        oldest run under sustained arrivals.
+        """
         Cron = self.env["ir.cron"]
-        Cron._commit_progress(remaining=len(runs))
-        for run in runs:
+        serviced = []
+        while True:
+            outstanding = self.search_count([("state", "=", "running")])
+            if not outstanding:
+                Cron._commit_progress(remaining=0)
+                return True
+
+            run = self._claim_next(serviced)
+            if run is None:
+                # Everything outstanding is either held by a peer lane or
+                # already serviced this pass. Report the work as still
+                # remaining so the job is rescheduled rather than reported
+                # complete, then start a fresh pass.
+                if not serviced:
+                    Cron._commit_progress(processed=0, remaining=outstanding)
+                    return True
+                serviced = []
+                continue
+
+            serviced.append(run.id)
             try:
                 with self.env.cr.savepoint():
-                    run.action_run_to_completion()
+                    run._advance()
+            except (pg_errors.SerializationFailure, pg_errors.DeadlockDetected):
+                # Not a tool failure. `_dispatch` re-raises these deliberately
+                # because the losing transaction's snapshot is void -- but
+                # `ir_cron._callback` has NO retry (it rolls back and re-raises;
+                # the retry lives in the HTTP dispatcher only), so swallowing
+                # them here would record a concurrency artifact as a business
+                # failure, indistinguishable from a real one in the data. Let it
+                # reach the cron, which rolls back this uncommitted step; the run
+                # stays `running` and is claimed again next pass.
+                raise
             except Exception:
                 _logger.exception("ai.agent.run %s drain failed", run.id)
                 run._set({"state": "failed", "error": "Unhandled error; see log."})
-            if not Cron._commit_progress(processed=1):
-                break
-        return True
+
+            # Commits, which releases the claimed row and lets a peer lane take
+            # it. `remaining` is recomputed from live state rather than
+            # decremented: if it ever reached 0 with work outstanding, core would
+            # match `case (True, _, 0)` -> FULLY_DONE and park the lane.
+            outstanding = self.search_count([("state", "=", "running")])
+            if not Cron._commit_progress(processed=1, remaining=outstanding):
+                return True
 
 
 class AiAgentRunStep(models.Model):

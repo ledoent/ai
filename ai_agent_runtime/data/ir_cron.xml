@@ -8,6 +8,11 @@
         <field name="model_id" ref="model_ai_agent_run" />
         <field name="state">code</field>
         <field name="code">model._cron_drain()</field>
+        <!-- Without this the scheduler user defaults to whoever installed the
+             module (ir_cron.py:112). The drain calls check_access("write") when
+             it locks a run, so the installing user's rights would silently
+             decide which runs the drain can see at all. -->
+        <field name="user_id" ref="base.user_root" />
         <field name="interval_number" eval="5" />
         <field name="interval_type">minutes</field>
         <field name="active" eval="False" />
