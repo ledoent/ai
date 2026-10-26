@@ -176,15 +176,30 @@ class AiAgentRun(models.Model):
         }
 
     def _lock_authority(self, tool):
+        """Pin the authority configuration for the duration of a dispatch.
+
+        Share mode, not exclusive. The invariant is reader/writer: a dispatch
+        *reads* the agent's grants and the tool's policy signature and writes
+        neither row, while every path that *changes* authority already takes
+        ``FOR UPDATE`` on them (``ai_agent.write``,
+        ``ai_agent_tool._lock``, ``ai_agent_capability._lock``). ``FOR SHARE``
+        keeps that mutual exclusion intact in both directions and drops only the
+        dispatcher-against-dispatcher conflict.
+
+        Exclusive mode made the tool row a global bottleneck: a tool is shared by
+        every agent that uses it, so any two runs invoking the same tool
+        serialised regardless of which agents owned them, and a shared tool
+        catalogue serialised on its busiest entry.
+        """
         self.agent_id.flush_recordset()
         self.env.cr.execute(
-            "SELECT id FROM ai_agent WHERE id = %s FOR UPDATE", [self.agent_id.id]
+            "SELECT id FROM ai_agent WHERE id = %s FOR SHARE", [self.agent_id.id]
         )
         self.agent_id.invalidate_recordset()
         if tool:
             tool.flush_recordset()
             self.env.cr.execute(
-                "SELECT id FROM ai_agent_tool WHERE id = %s FOR UPDATE", [tool.id]
+                "SELECT id FROM ai_agent_tool WHERE id = %s FOR SHARE", [tool.id]
             )
             tool.invalidate_recordset()
 

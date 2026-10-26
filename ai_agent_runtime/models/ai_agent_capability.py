@@ -241,8 +241,22 @@ class AiAgentCapability(models.Model):
         return True
 
     def _refresh_policy(self):
-        self._lock()
-        for cap in self:
+        """Demote any capability whose tool contract moved under it.
+
+        Compare before locking. This runs on every dispatch via
+        ``_snapshot_values``, and a capability row is the singleton for one
+        (agent, tool) pair -- so an unconditional exclusive lock here serialised
+        every concurrent run of a single agent on a single row. The common case
+        is that nothing changed and there is nothing to lock for.
+
+        The stale rows are re-checked under the lock, because a peer may have
+        refreshed them between the comparison and the acquisition.
+        """
+        stale = self.filtered(lambda cap: cap.policy != cap.tool_id._policy_signature())
+        if not stale:
+            return
+        stale._lock()
+        for cap in stale:
             if cap.policy != cap.tool_id._policy_signature():
                 cap._change("Tool or reversal contract changed.", level="observe")
 
