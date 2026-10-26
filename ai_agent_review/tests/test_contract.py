@@ -1,9 +1,9 @@
 from typing import ClassVar
 
 from odoo import api, fields, models
-from odoo.exceptions import UserError
+from odoo.exceptions import AccessError, UserError
 from odoo.orm.model_classes import add_to_registry
-from odoo.tests import TransactionCase, tagged
+from odoo.tests import TransactionCase, new_test_user, tagged
 
 
 class ReviewContractProposal(models.Model):
@@ -274,4 +274,64 @@ class TestReviewContract(TransactionCase):
         self.assertEqual(rules[0].name, "repeat")
         self.assertEqual(rules[0].source_count, 3)
         self.assertFalse(rules[0].active)
+        self.assertEqual(self.subject.ref, "Original")
+
+    # -- the proposer is not the judge ---------------------------------------
+
+    def _agent_identity(self):
+        """A user that some ai.agent names as its execution identity."""
+        user = new_test_user(
+            self.env, login="contract_agent_exec", groups="base.group_user"
+        )
+        self.env["ai.agent"].create(
+            {
+                "name": "Contract agent",
+                "user_id": user.id,
+                "tool_ids": [],
+            }
+        )
+        return user
+
+    def test_execution_identity_cannot_approve_its_own_proposal(self):
+        """Staging as data only means anything if approval needs someone else.
+
+        A vertical has to grant the agent's own group write access to the
+        proposal model so the agent can create proposals, and action_approve is
+        reachable with that same grant -- so without this the agent approves its
+        own work and _apply() runs. Measured against ai_recon_review before the
+        check existed: a medium-confidence proposal, created and approved by the
+        agent's credential over /json/2, rewrote a bank suspense line.
+        """
+        proposal = self.make_proposal()
+        agent_user = self._agent_identity()
+        with self.assertRaises(AccessError) as caught:
+            proposal.with_user(agent_user).action_approve()
+        self.assertIn("cannot judge its own proposal", str(caught.exception))
+        self.assertEqual(proposal.state, "proposed")
+        self.assertFalse(proposal.approved_by)
+        self.assertEqual(self.subject.ref, "Original")
+
+    def test_execution_identity_cannot_undo_an_applied_proposal(self):
+        proposal = self.make_proposal()
+        proposal.action_approve()
+        self.assertEqual(proposal.state, "applied")
+        agent_user = self._agent_identity()
+        with self.assertRaises(AccessError):
+            proposal.with_user(agent_user).action_undo()
+        self.assertEqual(proposal.state, "applied")
+
+    def test_a_human_reviewer_is_still_free_to_approve(self):
+        """The guard keys on being an execution identity, not on lacking rights."""
+        self._agent_identity()
+        proposal = self.make_proposal()
+        proposal.action_approve()
+        self.assertEqual(proposal.state, "applied")
+        self.assertEqual(proposal.approved_by, self.env.user)
+
+    def test_rejecting_your_own_proposal_stays_allowed(self):
+        """Declining applies nothing, and an agent may retract its own work."""
+        proposal = self.make_proposal()
+        agent_user = self._agent_identity()
+        proposal.with_user(agent_user).sudo().action_reject()
+        self.assertEqual(proposal.state, "rejected")
         self.assertEqual(self.subject.ref, "Original")

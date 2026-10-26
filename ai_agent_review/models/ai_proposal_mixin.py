@@ -1,7 +1,7 @@
 import types
 
 from odoo import api, fields, models
-from odoo.exceptions import UserError
+from odoo.exceptions import AccessError, UserError
 
 CONFIDENCE = [
     ("high", "Confident"),
@@ -78,9 +78,46 @@ class AiProposalMixin(models.AbstractModel):
         self.state = "applied"
         return True
 
+    def _assert_not_execution_identity(self):
+        """Refuse a judgement from the identity whose work is being judged.
+
+        Staging a proposal as data only means "unapproved cannot take effect" if
+        approving it requires someone other than the proposer. Without this the
+        two halves collapse: a vertical's access rules grant the agent's own
+        group write access to the proposal model so it can *create* proposals --
+        ``ai_recon_review`` grants ``account.group_account_invoice`` full
+        ``crud`` on ``ai.recon.proposal``, which is exactly the group its
+        ``readme/USAGE.md`` tells the operator to give the agent -- and
+        ``action_approve`` is reachable with that same grant.
+
+        Measured before this check existed: the agent's own credential created a
+        ``medium`` confidence proposal over ``/json/2`` -- one the confidence
+        router would only have flagged for a human -- approved it, and the
+        suspense line was rewritten to the proposed account, attributed to the
+        agent itself, with no ``ai.agent.call`` record anywhere.
+
+        The probe is the one already used by ``ai.agent._check_admin`` and
+        ``_check_reviewer``: ask whether any agent names this user as its
+        execution identity. A reverse lookup rather than a flag on the user, so
+        it cannot be sidestepped by group membership.
+        """
+        if (
+            self.env["ai.agent"]
+            .sudo()
+            .with_context(active_test=False)
+            .search_count([("user_id", "=", self.env.uid)])
+        ):
+            raise AccessError(
+                self.env._(
+                    "An agent execution identity cannot judge its own proposal. "
+                    "Approval requires a human reviewer."
+                )
+            )
+
     def action_approve(self):
         # Validate the whole selection before recording a judgement or applying
         # its first item. A later invalid item must not leave earlier effects.
+        self._assert_not_execution_identity()
         if any(proposal.state not in ("proposed", "observed") for proposal in self):
             raise UserError(self.env._("Only a proposed line can be approved."))
         self._assert_preconditions()
@@ -109,6 +146,16 @@ class AiProposalMixin(models.AbstractModel):
         return True
 
     def action_undo(self):
+        # Reversing an applied change is the same judgement in the other
+        # direction, so it carries the same restriction. `ai_recon_review`
+        # happens to be protected here anyway -- its `_undo` calls
+        # `action_undo_reconciliation`, which core refuses to an agent holding
+        # only `account.group_account_invoice` -- but that is core's ACL
+        # declining, not this contract, and another vertical's `_undo` need not
+        # be so lucky. `action_reject` is deliberately left open: declining your
+        # own proposal applies nothing, and blocking it would stop an agent from
+        # retracting a proposal it has reconsidered.
+        self._assert_not_execution_identity()
         for proposal in self.filtered(lambda p: p.state == "applied"):
             proposal._undo()
             proposal.state = "proposed"

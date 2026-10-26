@@ -196,6 +196,44 @@ class TestAgentCannotSignOff(ReconCommon):
         with self.assertRaises(AccessError):
             move.review_state = "supervised"
 
+    def test_agent_cannot_approve_its_own_proposal(self):
+        """The path the three tests above do not cover.
+
+        Those assert that the agent cannot write core's `review_state`. They say
+        nothing about `action_approve`, which is the route that actually applies
+        a proposal -- and `security/ir.access.csv` grants
+        `account.group_account_invoice` full `crud` on `ai.recon.proposal`, the
+        exact group `readme/USAGE.md` tells the operator to give the agent.
+
+        Measured over `/json/2` before the mixin guard existed: the agent's own
+        credential created a medium-confidence proposal, approved it, and the
+        suspense counterpart was rewritten to the proposed account with no
+        `ai.agent.call` record. See `ai-rfc/E7-RESULTS.md`.
+        """
+        # The group membership above is not what makes a user an agent; being
+        # named as some ai.agent's execution identity is.
+        self.env["ai.agent"].create(
+            {
+                "name": "Recon agent",
+                "user_id": self.agent_user.id,
+                "tool_ids": [],
+            }
+        )
+        proposal = self.make()
+        before = {line.id: line.account_id.id for line in self.st_line.move_id.line_ids}
+
+        with self.assertRaises(AccessError) as caught:
+            proposal.with_user(self.agent_user).action_approve()
+        self.assertIn("cannot judge its own proposal", str(caught.exception))
+
+        self.assertEqual(proposal.state, "proposed")
+        self.assertFalse(proposal.approved_by)
+        self.assertEqual(
+            {line.id: line.account_id.id for line in self.st_line.move_id.line_ids},
+            before,
+            "no accounting state may move when approval is refused",
+        )
+
 
 class TestRuleDiscovery(ReconCommon):
     """The part that compounds: unmatched lines become candidate rules."""
