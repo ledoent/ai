@@ -1,0 +1,289 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<odoo>
+    <record id="ai_agent_usage_rate_view_list" model="ir.ui.view">
+        <field name="model">ai.agent.usage.rate</field>
+        <field name="arch" type="xml">
+            <list create="1" edit="0" delete="0">
+                <field name="provider_kind" />
+                <field name="model" />
+                <field name="version" />
+                <field name="input_per_million" />
+                <field name="output_per_million" />
+                <field name="request_ceiling" />
+                <field name="currency_id" />
+                <field name="created_at" />
+                <field name="created_by" />
+            </list>
+        </field>
+    </record>
+    <record id="ai_agent_usage_rate_view_form" model="ir.ui.view">
+        <field name="model">ai.agent.usage.rate</field>
+        <field name="arch" type="xml">
+            <form create="1" edit="0" delete="0">
+                <sheet>
+                    <group>
+                        <field name="provider_kind" />
+                        <field name="model" />
+                        <field name="currency_id" />
+                        <field name="input_per_million" />
+                        <field name="output_per_million" />
+                        <field name="request_ceiling" />
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+    <record id="ai_agent_usage_rate_action" model="ir.actions.act_window">
+        <field name="name">Provider Rate Cards</field>
+        <field name="res_model">ai.agent.usage.rate</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <record id="ai_agent_usage_budget_view_list" model="ir.ui.view">
+        <field name="model">ai.agent.usage.budget</field>
+        <field name="arch" type="xml">
+            <list>
+                <field name="company_id" />
+                <field name="agent_id" />
+                <field name="monthly_limit" />
+                <field name="run_limit" />
+                <field name="currency_id" />
+            </list>
+        </field>
+    </record>
+    <record id="ai_agent_usage_budget_view_form" model="ir.ui.view">
+        <field name="model">ai.agent.usage.budget</field>
+        <field name="arch" type="xml">
+            <form>
+                <sheet>
+                    <group>
+                        <field name="company_id" />
+                        <field name="agent_id" />
+                        <field name="currency_id" />
+                        <field name="monthly_limit" />
+                        <field name="run_limit" />
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+    <record id="ai_agent_usage_budget_action" model="ir.actions.act_window">
+        <field name="name">Agent Usage Budgets</field>
+        <field name="res_model">ai.agent.usage.budget</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <record id="ai_agent_usage_attempt_view_list" model="ir.ui.view">
+        <field name="model">ai.agent.usage.attempt</field>
+        <field name="arch" type="xml">
+            <list create="0" edit="0" delete="0">
+                <field name="request_at" />
+                <field name="run_id" />
+                <field name="sequence" />
+                <field name="company_id" />
+                <field name="agent_id" />
+                <field name="provider_kind" />
+                <field name="model" />
+                <field name="state" />
+                <field name="budget_enforced" />
+                <field name="input_tokens" />
+                <field name="output_tokens" />
+                <field name="usage_status" />
+                <field name="cost_status" />
+                <field name="reservation_amount" />
+                <field name="held_amount" />
+                <field name="charged_amount" />
+                <field name="company_currency_id" />
+            </list>
+        </field>
+    </record>
+    <record id="ai_agent_usage_attempt_view_pivot" model="ir.ui.view">
+        <field name="model">ai.agent.usage.attempt</field>
+        <field name="arch" type="xml">
+            <pivot string="AI Usage">
+                <field name="company_id" type="row" />
+                <field name="agent_id" type="row" />
+                <field name="provider_kind" type="col" />
+                <field name="request_at" interval="month" type="col" />
+                <field name="input_tokens" type="measure" />
+                <field name="output_tokens" type="measure" />
+                <field name="charged_amount" type="measure" />
+                <field name="held_amount" type="measure" />
+            </pivot>
+        </field>
+    </record>
+    <record id="ai_agent_usage_attempt_view_form" model="ir.ui.view">
+        <field name="model">ai.agent.usage.attempt</field>
+        <field name="arch" type="xml">
+            <form create="0" edit="0" delete="0">
+                <header groups="base.group_system">
+                    <button
+                        name="action_adjust_hold"
+                        type="object"
+                        string="Adjust hold"
+                        class="btn-primary"
+                        invisible="state not in ['sending', 'unknown']"
+                    />
+                    <button
+                        name="action_release_hold"
+                        type="object"
+                        string="Release hold"
+                        invisible="state not in ['sending', 'unknown']"
+                    />
+                    <field name="state" widget="statusbar" />
+                </header>
+                <sheet>
+                    <group>
+                        <field name="attempt_uuid" />
+                        <field name="run_id" />
+                        <field name="run_db_id" />
+                        <field name="sequence" />
+                        <field name="company_id" />
+                        <field name="agent_id" />
+                        <field name="provider_kind" />
+                        <field name="provider_name" />
+                        <field name="model" />
+                        <field name="request_id" />
+                        <field name="budget_enforced" />
+                    </group>
+                    <group string="Usage and cost">
+                        <field name="input_tokens" />
+                        <field name="output_tokens" />
+                        <field name="usage_status" />
+                        <field name="usage_provenance" />
+                        <field name="cost_status" />
+                        <field name="cost_provenance" />
+                        <field name="provider_cost_amount" />
+                        <field name="provider_cost_currency_id" />
+                        <field name="provider_cost_fx_rate" />
+                        <field name="rate_id" />
+                        <field name="rate_version" />
+                        <field name="fx_rate" />
+                        <field name="fx_date" />
+                        <field name="request_ceiling" />
+                        <field name="reservation_amount" />
+                        <field name="held_amount" />
+                        <field name="charged_amount" />
+                        <field name="company_currency_id" />
+                        <field name="reservation_state" />
+                        <field name="send_state" />
+                    </group>
+                    <group string="Hold resolution" groups="base.group_system">
+                        <field
+                            name="resolution_amount_input"
+                            invisible="state not in ['sending', 'unknown']"
+                        />
+                        <field
+                            name="resolution_note_input"
+                            invisible="state not in ['sending', 'unknown']"
+                        />
+                        <field name="resolution_action" />
+                        <field name="resolution_note" />
+                        <field name="resolved_by" />
+                        <field name="resolved_at" />
+                        <field name="decision_json" />
+                    </group>
+                    <field name="error_summary" />
+                </sheet>
+            </form>
+        </field>
+    </record>
+    <record id="ai_agent_usage_attempt_action" model="ir.actions.act_window">
+        <field name="name">AI Usage</field>
+        <field name="res_model">ai.agent.usage.attempt</field>
+        <field name="view_mode">list,pivot,form</field>
+    </record>
+
+    <record id="ai_agent_usage_company_form" model="ir.ui.view">
+        <field name="name">res.company.form.ai.usage</field>
+        <field name="model">res.company</field>
+        <field name="inherit_id" ref="base.view_company_form" />
+        <field name="arch" type="xml">
+            <xpath expr="//notebook" position="inside">
+                <page string="AI Usage" groups="base.group_system">
+                    <group>
+                        <field name="ai_usage_enabled" />
+                        <field name="ai_usage_monthly_limit" />
+                        <field name="ai_usage_timezone" />
+                        <field name="ai_usage_tracking_started_at" />
+                    </group>
+                    <p>Usage before tracking started is not imported or backfilled.</p>
+                </page>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="ai_agent_usage_agent_view" model="ir.ui.view">
+        <field name="name">ai.agent.form.usage.budgets</field>
+        <field name="model">ai.agent</field>
+        <field name="inherit_id" ref="ai_agent_runtime.ai_agent_view_form" />
+        <field name="arch" type="xml">
+            <field name="tool_ids" position="after">
+                <group string="Usage budgets" groups="base.group_system">
+                    <field name="usage_budget_ids">
+                        <list>
+                            <field name="company_id" />
+                            <field name="monthly_limit" />
+                            <field name="run_limit" />
+                            <field name="currency_id" />
+                        </list>
+                    </field>
+                </group>
+            </field>
+        </field>
+    </record>
+
+    <record id="ai_agent_usage_run_view" model="ir.ui.view">
+        <field name="name">ai.agent.run.form.usage</field>
+        <field name="model">ai.agent.run</field>
+        <field name="inherit_id" ref="ai_agent_runtime.ai_agent_run_view_form" />
+        <field name="arch" type="xml">
+            <xpath expr="//header" position="inside">
+                <button
+                    name="action_resume_usage"
+                    type="object"
+                    string="Resume after usage hold"
+                    class="btn-primary"
+                    groups="base.group_system"
+                    invisible="state != 'usage_hold'"
+                />
+            </xpath>
+            <field name="agent_id" position="after">
+                <field name="billing_company_id" readonly="state != 'draft'" />
+                <field name="usage_currency_id" invisible="not billing_company_id" />
+                <field name="usage_run_limit" invisible="not usage_run_limit" />
+            </field>
+            <field name="error" position="after">
+                <field name="usage_hold_reason" invisible="not usage_hold_reason" />
+            </field>
+        </field>
+    </record>
+
+    <menuitem
+        id="menu_ai_agent_usage"
+        name="AI Usage"
+        parent="ai_agent_runtime.menu_ai_agent_root"
+        sequence="40"
+        groups="base.group_user"
+    />
+    <menuitem
+        id="menu_ai_agent_usage_attempt"
+        parent="menu_ai_agent_usage"
+        action="ai_agent_usage_attempt_action"
+        sequence="10"
+    />
+    <menuitem
+        id="menu_ai_agent_usage_rate"
+        parent="menu_ai_agent_usage"
+        action="ai_agent_usage_rate_action"
+        sequence="20"
+        groups="base.group_system"
+    />
+    <menuitem
+        id="menu_ai_agent_usage_budget"
+        parent="menu_ai_agent_usage"
+        action="ai_agent_usage_budget_action"
+        sequence="30"
+        groups="base.group_system"
+    />
+</odoo>
