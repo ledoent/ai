@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<odoo>
+    <record id="scope_ai_agent_usage_attempt" model="ir.access">
+        <field name="name">AI usage attempt company and agent scope</field>
+        <field name="model_id" ref="model_ai_agent_usage_attempt" />
+        <field name="operation">r</field>
+        <field
+            name="domain"
+        >[] if user.has_group('base.group_system') else [('company_id', 'in', company_ids), '|', ('agent_id.user_id', '=', user.id), ('agent_id.reviewer_ids', 'in', [user.id])]</field>
+    </record>
+</odoo>

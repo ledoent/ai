@@ -48,6 +48,17 @@ class AiAgentRun(models.Model):
             "step_budget",
         }
 
+    def _provider_decision(self):
+        """Select the next action through the provider integration hook."""
+        self.ensure_one()
+        return self.provider_snapshot_id._decide(
+            self.goal, self._transcript(), self.agent_id._tool_schemas()
+        )
+
+    def _before_provider_decision(self):
+        """Allow optional addons to pause a run before its next provider call."""
+        return False
+
     provider_snapshot_id = fields.Many2one("ai.agent.provider", readonly=True)
     step_budget = fields.Integer(readonly=True)
 
@@ -70,9 +81,11 @@ class AiAgentRun(models.Model):
         if self.step_no >= self.step_budget:
             self._set({"state": "failed", "error": "Step budget exhausted."})
             return False
-        decision = self.provider_snapshot_id._decide(
-            self.goal, self._transcript(), self.agent_id._tool_schemas()
-        )
+        if self._before_provider_decision():
+            return False
+        decision = self._provider_decision()
+        if decision is None:
+            return False
         if decision.get("kind") == "final":
             self._set({"state": "done", "answer": decision.get("answer") or ""})
             return False
