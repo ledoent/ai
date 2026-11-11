@@ -19,14 +19,14 @@
                     name="action_approve"
                     string="Approve"
                     type="object"
-                    icon="fa-check"
+                    icon="check"
                     invisible="state != 'proposed'"
                 />
                 <button
                     name="action_reject"
                     string="Reject"
                     type="object"
-                    icon="fa-times"
+                    icon="close"
                     invisible="state != 'proposed'"
                 />
             </list>
