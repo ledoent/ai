@@ -1,0 +1,6 @@
+id,name,model_id,group_id/id,operation,domain
+access_ai_recon_assessment_account,ai.recon.assessment accountant,ai.recon.assessment,account.group_account_invoice,r,
+access_ai_recon_match_account,ai.recon.match accountant,ai.recon.match,account.group_account_invoice,r,
+access_ai_recon_allocation_account,ai.recon.match.allocation accountant,ai.recon.match.allocation,account.group_account_invoice,r,
+access_ai_recon_reject_wizard_reviewer,ai.recon.match.reject.wizard reviewer,ai.recon.match.reject.wizard,ai_agent_runtime.group_ai_reviewer,crud,
+access_ai_recon_withdraw_wizard_reviewer,ai.recon.match.withdraw.wizard reviewer,ai.recon.match.withdraw.wizard,ai_agent_runtime.group_ai_reviewer,crud,

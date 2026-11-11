@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<odoo>
+    <!-- Inactive by default: enabling background execution should be a
+         deliberate act, and an always-on drain in a test or review database
+         would execute plans nobody asked for. -->
+    <record id="ir_cron_ai_agent_drain" model="ir.cron">
+        <field name="name">AI Agent: drain pending runs</field>
+        <field name="model_id" ref="model_ai_agent_run" />
+        <field name="state">code</field>
+        <field name="code">model._cron_drain()</field>
+        <!-- Without this the scheduler user defaults to whoever installed the
+             module (ir_cron.py:112). The drain calls check_access("write") when
+             it locks a run, so the installing user's rights would silently
+             decide which runs the drain can see at all. -->
+        <field name="user_id" ref="base.user_root" />
+        <field name="interval_number" eval="5" />
+        <field name="interval_type">minutes</field>
+        <field name="active" eval="False" />
+    </record>
+    <record id="ir_cron_ai_agent_promote" model="ir.cron">
+        <field name="name">AI Agent: evaluate earned authority</field>
+        <field name="model_id" ref="model_ai_agent_capability" />
+        <field name="state">code</field>
+        <field name="code">model._cron_promote()</field>
+        <field name="user_id" ref="base.user_root" />
+        <field name="interval_number" eval="1" />
+        <field name="interval_type">days</field>
+        <field name="active" eval="True" />
+    </record>
+</odoo>

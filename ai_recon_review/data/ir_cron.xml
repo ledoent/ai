@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!-- noupdate: once this exists, its schedule and active flag belong to
+     whoever configured them. Without it every module upgrade reloads the
+     record and silently switches the job back off, which is how a nightly
+     batch quietly stops arriving. -->
+<odoo noupdate="1">
+    <!-- Inactive by default: a module install should not start emailing
+         people on a schedule. Activate it, and set the interval, deliberately. -->
+    <record id="ir_cron_recon_batch" model="ir.cron">
+        <field name="name">AI Reconciliation: build and send the review batch</field>
+        <field name="model_id" ref="ai_recon_review.model_ai_recon_batch" />
+        <field name="state">code</field>
+        <field name="code">model._cron_build_and_send()</field>
+        <field name="interval_number" eval="1" />
+        <field name="interval_type">days</field>
+        <field name="active" eval="False" />
+    </record>
+</odoo>
